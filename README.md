@@ -55,6 +55,8 @@ make daily                                  # = ./loop/daily.sh
 單獨試工具鏈（不叫 LLM）：`make scan`、`make lint`、`make test`，或 `KM_SKIP_AGENT=1 make daily`。
 隨選深潛一個主題：`make learn TOPIC="KV cache 為什麼省算力"`。
 
+📖 **完整教學見 [docs/USAGE.md](docs/USAGE.md)** — 第一天怎麼開始、日常節奏、怎麼下好指令、驗收與疑難排解。
+
 ### 讓它每天自己跑
 
 擇一：
@@ -78,7 +80,8 @@ make daily                                  # = ./loop/daily.sh
 - **語言**：預設繁體中文（標題與術語用英文）。改 `AGENTS.md` 裡的一行即可。
 - **預算**：`KM_MAX_ITEMS`（預設 3 個工作項/天）控制成本上限。
 - **模型**：`KM_MODEL=anthropic/claude-sonnet-4-5` 之類（`provider/model` 格式，`opencode models` 可列出）。
-- **本機私有指令**：`loop/local/*.md`（gitignored）會注入每天的 prompt，優先級同 Inbox — 適合放只屬於這台機器的來源（例如你在 opencode 全域設定掛的 MCP 工具）與偏好，範例見 [`loop/local.example.md`](loop/local.example.md)。
+- **本機私有指令**：`loop/local/*.md`（gitignored）會注入每天的 prompt，優先級同 Inbox — 適合放只屬於這台機器的來源與偏好，範例見 [`loop/local.example.md`](loop/local.example.md)。
+- **接上外部來源（MCP）**：讓迴圈每天自己去某個系統抓新素材，含「從哪裡抓起」的游標機制 — 見 [docs/SOURCES.md](docs/SOURCES.md)。
 - **權限**：[`opencode.json`](opencode.json) 限制 agent 只能編輯 `vault/`，git commit/push/rm 一律 deny — commit 永遠由外層腳本執行，agent 寫不進歷史。
 - **寫作規範**：`vault/_meta/Style Guide.md` 是憲法，`tools/vault.py lint` 是執法者。
 
@@ -99,7 +102,10 @@ tests/                    工具鏈測試（python3 -m unittest）
 loop/daily.sh             迴圈外骨骼：scan → agent → lint → commit → push
 scripts/ systemd/         cron 與 systemd timer 安裝器
 .github/workflows/daily.yml
-docs/                     設計文件與先行者研究
+docs/USAGE.md             使用手冊（從第一天到日常掌舵）
+docs/SOURCES.md           接上外部素材來源（MCP）與游標機制
+docs/DESIGN.md            設計決策紀錄
+docs/RESEARCH.md          先行者研究快照
 ```
 
 ## 靈感與致謝

@@ -187,5 +187,55 @@ class TestSeed(VaultFixture):
         self.assertEqual(json.loads(payload)["totals"]["dangling_links"], 1)
 
 
+class TestCursor(unittest.TestCase):
+    """Cursors are how the loop remembers where each external source got to."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.state = str(Path(self._tmp.name) / "state" / "cursors.json")
+        self.addCleanup(self._tmp.cleanup)
+
+    def run_cursor(self, *argv):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = vt.main(["--today", "2026-08-14", "cursor", *argv, "--state", self.state])
+        return code, buf.getvalue().strip()
+
+    def test_unset_get_returns_default(self):
+        code, out = self.run_cursor("get", "acme", "--default", "2026-01-01")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "2026-01-01")
+
+    def test_set_then_get_roundtrip(self):
+        self.assertEqual(self.run_cursor("set", "acme", "DOC-42", "--note", "last synced")[0], 0)
+        self.assertEqual(self.run_cursor("get", "acme")[1], "DOC-42")
+        # a later run advances the watermark
+        self.run_cursor("set", "acme", "DOC-99")
+        self.assertEqual(self.run_cursor("get", "acme")[1], "DOC-99")
+        stored = json.loads(Path(self.state).read_text(encoding="utf-8"))
+        self.assertEqual(stored["acme"]["updated"], "2026-08-14")
+
+    def test_list_is_prompt_friendly(self):
+        self.assertIn("no cursors set", self.run_cursor("list")[1])
+        self.run_cursor("set", "acme", "2026-08-13T00:00:00Z", "--note", "nightly sync")
+        code, out = self.run_cursor("list")
+        self.assertEqual(code, 0)
+        self.assertIn("acme: 2026-08-13T00:00:00Z", out)
+        self.assertIn("nightly sync", out)
+
+    def test_corrupt_file_does_not_crash(self):
+        Path(self.state).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.state).write_text("{not json", encoding="utf-8")
+        self.assertEqual(self.run_cursor("get", "acme", "--default", "x")[1], "x")
+        self.assertEqual(self.run_cursor("set", "acme", "ok")[0], 0)
+        self.assertEqual(self.run_cursor("get", "acme")[1], "ok")
+
+    def test_missing_args_are_rejected(self):
+        self.assertEqual(self.run_cursor("get")[0], 2)
+        self.assertEqual(self.run_cursor("set", "acme")[0], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
