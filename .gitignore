@@ -1,0 +1,15 @@
+# loop runtime artifacts
+loop/logs/
+loop/state/
+# per-machine private instructions — never committed
+loop/local/
+
+# python
+__pycache__/
+*.py[co]
+
+# obsidian volatile files (commit the rest of .obsidian if you like)
+vault/.obsidian/workspace*
+vault/.obsidian/cache/
+
+.DS_Store
