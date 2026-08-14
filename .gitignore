@@ -4,6 +4,18 @@ loop/state/
 # per-machine private instructions — never committed
 loop/local/
 
+# opencode's local runtime: it bootstraps a plugin/dependency sandbox in any
+# directory holding a project config. Machine artifacts, not source — this repo
+# has no JavaScript of its own.
+node_modules/
+package.json
+package-lock.json
+bun.lock
+bun.lockb
+.opencode/node_modules/
+.opencode/package.json
+.opencode/bun.lock*
+
 # python
 __pycache__/
 *.py[co]
