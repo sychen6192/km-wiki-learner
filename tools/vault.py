@@ -40,6 +40,9 @@ ORPHAN_DIRS = ("Notes", "Sources")
 STATS_START = "<!-- km:stats:start -->"
 STATS_END = "<!-- km:stats:end -->"
 STALE_SEED_DAYS = 14
+# Ingestion watermarks ("where did I get to last time") for external sources.
+# Lives under loop/state/, which is gitignored — private to each machine.
+CURSOR_FILE = "loop/state/cursors.json"
 
 WIKILINK_RE = re.compile(r"\[\[([^\]\|#\n]+)(?:#[^\]\|\n]*)?(?:\|[^\]\n]*)?\]\]")
 # Generated dashboard content is not part of the knowledge graph — links inside
@@ -443,6 +446,72 @@ def seed(vault_root: Path, title: str, reason: str, today: dt.date) -> int:
 
 
 # ---------------------------------------------------------------------------
+# cursor (ingestion watermarks for external sources)
+# ---------------------------------------------------------------------------
+
+def cursor(args, repo_root: Path, today: dt.date) -> int:
+    """Track how far each external source has been ingested.
+
+    The daily prompt injects `cursor list` so the agent knows where to resume;
+    after ingesting it calls `cursor set <name> <value>` to move the watermark.
+    Values are opaque strings — an ISO timestamp, a document ID, a page token.
+    """
+    path = Path(args.state) if args.state else repo_root / CURSOR_FILE
+    data = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print(f"cursor: {path} is corrupt, starting fresh", file=sys.stderr)
+
+    if args.action == "list":
+        if not data:
+            print("(no cursors set — treat every source as a first run)")
+            return 0
+        for name in sorted(data):
+            entry = data[name] if isinstance(data[name], dict) else {"value": data[name]}
+            line = f"{name}: {entry.get('value', '')}"
+            if entry.get("note"):
+                line += f"  # {entry['note']}"
+            if entry.get("updated"):
+                line += f"  (updated {entry['updated']})"
+            print(line)
+        return 0
+
+    if not args.name:
+        print(f"cursor: {args.action} requires a cursor name", file=sys.stderr)
+        return 2
+
+    if args.action == "get":
+        entry = data.get(args.name)
+        if isinstance(entry, dict):
+            print(entry.get("value", ""))
+        elif entry is not None:
+            print(entry)
+        else:
+            print(args.default)
+        return 0
+
+    if args.action == "set":
+        if args.value is None:
+            print("cursor: set requires a value", file=sys.stderr)
+            return 2
+        data[args.name] = {
+            "value": args.value,
+            "note": args.note,
+            "updated": today.isoformat(),
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(f"cursor: {args.name} -> {args.value}")
+        return 0
+    return 2
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -459,13 +528,25 @@ def main(argv=None) -> int:
     p_seed = sub.add_parser("seed", help="create a seed note")
     p_seed.add_argument("title")
     p_seed.add_argument("--reason", default="", help="why this seed exists (e.g. 'linked from X')")
+    p_cursor = sub.add_parser("cursor", help="read/write ingestion watermarks for external sources")
+    p_cursor.add_argument("action", choices=["list", "get", "set"])
+    p_cursor.add_argument("name", nargs="?", help="cursor name, e.g. the source's short id")
+    p_cursor.add_argument("value", nargs="?", help="new watermark: timestamp, doc id, page token…")
+    p_cursor.add_argument("--default", default="", help="printed by `get` when the cursor is unset")
+    p_cursor.add_argument("--note", default="", help="human-readable hint stored alongside the value")
+    p_cursor.add_argument("--state", default=None, help="override the cursor file path")
     args = parser.parse_args(argv)
 
-    root = Path(args.vault) if args.vault else Path(__file__).resolve().parent.parent / "vault"
+    repo_root = Path(__file__).resolve().parent.parent
+    today_arg = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
+    if args.cmd == "cursor":
+        return cursor(args, repo_root, today_arg)
+
+    root = Path(args.vault) if args.vault else repo_root / "vault"
     if not root.is_dir():
         print(f"vault directory not found: {root}", file=sys.stderr)
         return 2
-    today = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
+    today = today_arg
 
     if args.cmd == "seed":
         return seed(root, args.title, args.reason, today)
