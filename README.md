@@ -55,7 +55,8 @@ make daily                                  # = ./loop/daily.sh
 單獨試工具鏈（不叫 LLM）：`make scan`、`make lint`、`make test`，或 `KM_SKIP_AGENT=1 make daily`。
 隨選深潛一個主題：`make learn TOPIC="KV cache 為什麼省算力"`。
 
-📖 **完整教學見 [docs/USAGE.md](docs/USAGE.md)** — 第一天怎麼開始、日常節奏、怎麼下好指令、驗收與疑難排解。
+📖 **從零走一遍：[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)** — 以「準備日文 N4，把老師的講義和作業餵進去」為例的完整實作流程。
+📘 **日常操作與疑難排解：[docs/USAGE.md](docs/USAGE.md)**
 
 ### 讓它每天自己跑
 
