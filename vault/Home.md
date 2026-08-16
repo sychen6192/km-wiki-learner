@@ -15,7 +15,7 @@
 <!-- km:stats:start -->
 > [!info] 圖書館現況 · 2026-08-16
 > 筆記 **7** 篇 — 🌱 seed 0 · 🌿 budding 4 · 🌳 evergreen 3
-> 待長出的連結（frontier）**3** · 到期複習 **0** · Inbox 待辦 **3** · Raw 待消化 **1**
+> 待長出的連結（frontier）**3** · 到期複習 **0** · Inbox 待辦 **3** · Raw 待消化 **2**
 
 **知識前緣** — 已被引用但還不存在的頁面（明日候選）：
 - [[Digital Garden]] ×5
