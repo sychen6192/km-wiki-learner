@@ -14,8 +14,8 @@
 
 <!-- km:stats:start -->
 > [!info] 圖書館現況 · 2026-08-17
-> 筆記 **13** 篇 — 🌱 seed 1 · 🌿 budding 9 · 🌳 evergreen 3
-> 待長出的連結（frontier）**9** · 到期複習 **0** · Inbox 待辦 **1** · Raw 待消化 **1**
+> 筆記 **14** 篇 — 🌱 seed 1 · 🌿 budding 10 · 🌳 evergreen 3
+> 待長出的連結（frontier）**8** · 到期複習 **0** · Inbox 待辦 **0** · Raw 待消化 **0**
 
 **知識前緣** — 已被引用但還不存在的頁面（明日候選）：
 - [[Digital Garden]] ×7
@@ -24,7 +24,6 @@
 - [[PARA method]] ×2
 - [[KV quantization]] ×1
 - [[N4語彙マスター U11–U15]] ×1
-- [[N4語彙マスター_8_実践演習U16-U20]] ×1
 - [[paged attention]] ×1
 - [[sliding window]] ×1
 
