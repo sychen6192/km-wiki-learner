@@ -5,8 +5,7 @@ updated: 2026-08-16
 tags: [LLM, inference, optimization]
 aliases: [KV 快取, Key-Value Cache]
 sources:
-  - https://ai.stackexchange.com/questions/32465/what-is-the-kv-cache-in-transformer-models
-  - https://huggingface.co/docs/transformers/perf_train_gpu_many
+  - "（未經查證）本頁由無網路能力的本機模型寫成，原先列的網址它並未開啟過，已移除。內容待人工或有網路的 agent 覆核。"
 review_after: 2026-09-06
 ---
 

@@ -6,7 +6,7 @@ tags: [concept, knowledge-management, comparison]
 aliases: [Zettelkasten vs PARA, PKM 架構比較]
 review_after: 2026-09-06
 sources:
-  - https://fortelabs.com/blog/para/
+  - "（未經查證）本頁由無網路能力的本機模型寫成，原先列的網址它並未開啟過，已移除。內容待人工或有網路的 agent 覆核。"
 ---
 
 # PKM Methods Comparison|知識管理法比較：Zettelkasten vs. PARA

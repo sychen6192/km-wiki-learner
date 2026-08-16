@@ -53,6 +53,23 @@ VAULT_COMMANDS = ("scan", "lint", "stats", "seed")
 MAX_READ_CHARS = 200_000
 
 
+# The task prompt is written for a general agent and tells it to go and verify
+# things online. This runner has no network tool, so an instruction to browse is
+# an instruction to invent: a real run cited a jlpt.jp URL it could not possibly
+# have opened. The runner is the only thing that knows what it can actually do,
+# so it says so up front.
+CAPABILITIES = """## 你這次的實際能力（先讀這段，它覆蓋下面任何相衝突的指示）
+
+你**只有**這些工具：`list_dir`、`read_file`、`write_file`、`edit_file`、`vault`。
+
+- **你沒有網路，也沒有 shell。** 下面的指示若叫你「上網查證」，你做不到。
+- 因此 `sources:` 只能填**你這次真的用 `read_file` 讀過的 repo 內路徑**。
+  絕對不要寫網址——你無法開啟它，寫上去就是編造來源。
+- 教材讀不到、或你不確定某個說法時，就在筆記裡明說「不確定」或直接略過。
+  留一個誠實的缺口是可以的；用你的先驗把它補起來不行。
+- 引用教材時，例句要是你在抽出的文字裡真的看得到的那幾句。"""
+
+
 class ToolError(Exception):
     """A tool refused the call. The message goes back to the model verbatim."""
 
@@ -293,7 +310,7 @@ def main(argv) -> int:
         raise SystemExit("agent: 要指定模型（--model 或 KM_MODEL）")
 
     print(f"agent: {args.model} @ {base} ({style} 格式)", file=sys.stderr)
-    messages = [{"role": "user", "content": args.prompt}]
+    messages = [{"role": "user", "content": CAPABILITIES + "\n\n---\n\n" + args.prompt}]
     used = 0
 
     while used < args.max_steps:
