@@ -6,7 +6,7 @@
 
 ## 待學清單
 
-- [ ] 消化 `Raw/` 裡的素材，依內容開一張對應領域的 Map，把概念各寫一頁
+- [x] 消化 `Raw/` 裡的素材，依內容開一張對應領域的 Map，把概念各寫一頁 → [[N4語彙マスター消化]]
 - [x] Transformer 的 KV cache：它到底省了什麼、代價是什麼？ → [[KV cache]]
 - [x] Zettelkasten 和 PARA 方法的差異，哪個適合工程師？ → [[PKM Methods Comparison]]
 
