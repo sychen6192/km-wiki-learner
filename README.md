@@ -85,6 +85,16 @@ make daily                                  # = ./loop/daily.sh
 - **本機私有指令**：`loop/local/*.md`（gitignored）會注入每天的 prompt，優先級同 Inbox — 適合放只屬於這台機器的來源與偏好，範例見 [`loop/local.example.md`](loop/local.example.md)。
 - **接上外部來源（MCP）**：讓迴圈每天自己去某個系統抓新素材，含「從哪裡抓起」的游標機制 — 見 [docs/SOURCES.md](docs/SOURCES.md)。
 - **換掉 opencode**：`KM_AGENT_CMD="claude -p" make daily` — prompt 是純文字，agent 只是執行器。
+- **接自己的模型（不裝任何 agent CLI）**：`tools/agent.py` 是內建的極簡 tool-calling
+  runner，直接打你自己的 endpoint，只用標準函式庫。模型需要支援 tool calling
+  （純 completion 的模型寫不了檔案，也就長不了 vault）：
+  ```bash
+  KM_API_BASE=http://llm:11434 KM_MODEL=qwen3.6:35b-a3b \
+    KM_AGENT_CMD="python3 tools/agent.py" ./loop/daily.sh
+  ```
+  預設講 Ollama 的 `/api/chat`（這樣才能指定 `KM_NUM_CTX`，避免 context 被默默砍掉）；
+  `KM_API_STYLE=openai` 可改用 OpenAI 相容端點。模型拿不到 shell，只能讀寫 repo 內的
+  `.md`、跑 vault 工具；`Raw/` 唯讀，`locked: true` 與 `<!--SR:...-->` 有防呆擋著。
 - **權限**：repo 內沒有任何 agent 設定檔，權限限制放你的全域設定（見 [WALKTHROUGH](docs/WALKTHROUGH.md) 的「安全邊界」）。git 寫入一律由外層腳本執行，agent 改不動歷史。
 - **寫作規範**：`vault/_meta/Style Guide.md` 是憲法，`tools/vault.py lint` 是執法者。
 
