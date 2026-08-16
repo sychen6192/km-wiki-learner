@@ -106,14 +106,21 @@ python3 tools/extract.py 2>&1 | tee -a "$LOG" || log "WARN: extraction had probl
 python3 tools/vault.py scan --out loop/state/scan.json | tee -a "$LOG"
 
 # --- agent -------------------------------------------------------------------
+AGENT_FAILED=""
 if [[ -z "${KM_SKIP_AGENT:-}" ]]; then
     if [[ -n "${KM_TOPIC:-}" ]]; then
         log "on-demand mode: learn '$KM_TOPIC'"
-        run_agent prompts/learn.md "${KM_TIMEOUT:-3600}" "$KM_TOPIC" \
-            || log "WARN: agent run exited non-zero; postflight will validate what it left behind"
+        run_agent prompts/learn.md "${KM_TIMEOUT:-3600}" "$KM_TOPIC" || AGENT_FAILED=1
     else
-        run_agent prompts/daily.md "${KM_TIMEOUT:-3600}" \
-            || log "WARN: agent run exited non-zero; postflight will validate what it left behind"
+        run_agent prompts/daily.md "${KM_TIMEOUT:-3600}" || AGENT_FAILED=1
+    fi
+    if [[ -n "$AGENT_FAILED" ]]; then
+        log "WARN: agent run exited non-zero — whatever it left behind is still validated"
+        log "WARN: and committed, but this run's commit reflects little or no agent work"
+    fi
+    if [[ ! -f "vault/Daily/$DATE.md" ]]; then
+        log "WARN: no daily report written — the agent did not finish its work"
+        AGENT_FAILED=1
     fi
 else
     log "KM_SKIP_AGENT set — skipping agent run"
@@ -137,8 +144,10 @@ if git diff --cached --quiet; then
     log "no vault changes today — done"
     exit 0
 fi
+# A failed run still commits — losing the agent's partial work would be worse —
+# but the message must not read like a successful one.
 SUMMARY="$(sed -n 's/^> 一句話：//p' "vault/Daily/$DATE.md" 2>/dev/null | head -1 || true)"
-git commit -m "wiki(daily): $DATE${SUMMARY:+ — $SUMMARY}" 2>&1 | tee -a "$LOG"
+git commit -m "wiki(daily): $DATE${AGENT_FAILED:+ [agent 未完成]}${SUMMARY:+ — $SUMMARY}" 2>&1 | tee -a "$LOG"
 
 if [[ -z "${KM_NO_PUSH:-}" ]] && git remote get-url origin >/dev/null 2>&1; then
     BRANCH="$(git rev-parse --abbrev-ref HEAD)"
