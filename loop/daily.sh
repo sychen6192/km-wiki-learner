@@ -31,11 +31,18 @@ LOG="loop/logs/$DATE.log"
 LOCK="loop/state/lock"
 take_lock() {
     if ! mkdir "$LOCK" 2>/dev/null; then
-        local owner
+        local owner stale=""
         owner="$(cat "$LOCK/pid" 2>/dev/null || true)"
-        if [[ -n "$owner" ]] && kill -0 "$owner" 2>/dev/null; then
-            return 1
+        # Two independent ways to be stale, because either check alone can be
+        # fooled: a dead owner is obvious, but a recycled PID looks alive
+        # forever — so a lock older than any plausible run is stale regardless.
+        if [[ -z "$owner" ]] || ! kill -0 "$owner" 2>/dev/null; then
+            stale=1
         fi
+        if [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +"${KM_LOCK_MAX_MIN:-120}" 2>/dev/null)" ]]; then
+            stale=1
+        fi
+        [[ -n "$stale" ]] || return 1
         echo "km-wiki: reclaiming stale lock from pid ${owner:-unknown}" >&2
         rm -rf "$LOCK"
         mkdir "$LOCK" 2>/dev/null || return 1

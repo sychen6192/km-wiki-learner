@@ -70,6 +70,7 @@ iCloud/Syncthing 同步），通勤時丟題目、剪網頁、刷卡；生長在
 
 ```bash
 make doctor                       # 檢查這台機器缺什麼（跑不動時第一個跑這個）
+make unlock                       # 清掉被中斷的執行留下的鎖
 make daily                        # 每日迴圈（cron 跑的就是這個）
 make learn TOPIC="Raft 共識演算法"  # 現在就深潛一個主題
 make prompt                       # 印出這次要送出去的 prompt，不花 token
@@ -133,7 +134,8 @@ make scan | head -40                    # 現在的待辦與知識前緣
 | 卡住不動、log 有 `auto-rejecting` | 某個權限沒開，在全域 `~/.config/opencode/opencode.json` 加 `allow` |
 | lint 一直有 error | 看 `make lint` 指的那幾行；`daily` 已內建一次自動修復 |
 | 想重跑今天 | 直接再跑一次 `make daily`；迴圈冪等，工作由現況決定 |
-| 兩個迴圈同時跑 | 不會 —— 第二個會偵測到鎖並退出；被 kill 的殘留鎖下次自動回收 |
+| 兩個迴圈同時跑 | 不會 —— 第二個會偵測到鎖並退出 |
+| 一直說 another loop is already running | `make unlock`：真的在跑會告訴你 pid，殘留的鎖會直接清掉 |
 | 複習進度不見了 | 檢查是否有人改動 `<!--SR:...-->` 註解（Style Guide 明令禁止） |
 
 日誌都在 `loop/logs/`，狀態在 `loop/state/`，兩者都不進 git。
