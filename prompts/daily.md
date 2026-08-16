@@ -7,7 +7,7 @@
 ## Vault 現況（scan）
 
 ```json
-!`python3 tools/vault.py scan`
+!`"$KM_PYTHON" tools/vault.py scan`
 ```
 
 ## Inbox（人類出的題）
@@ -17,7 +17,7 @@
 ## Raw 素材（已自動轉成文字，直接讀對應路徑即可）
 
 ```
-!`python3 tools/extract.py --list`
+!`"$KM_PYTHON" tools/extract.py --list`
 ```
 
 ## 本機補充指令（空白就略過）
@@ -31,7 +31,7 @@
    動工前先讀相關的既有筆記與 Maps，新內容要接上既有的圖。
 2. **研究** — 需要外部資訊就上網查證，優先一手來源。查不到就明說「不確定」，**絕不編造**。
 3. **寫作**
-   - 新概念 → `vault/Notes/`（可先 `python3 tools/vault.py seed "Title"` 再充實）。
+   - 新概念 → `vault/Notes/`（可先 `"$KM_PYTHON" tools/vault.py seed "Title"` 再充實）。
    - Raw 素材 → 一篇 `vault/Sources/` 摘要（模板 `vault/_meta/Templates/Source.md`），
      以 wikilink 指回原始檔，並把內容裡的概念各自織進或長成概念筆記。**原始檔絕不修改**。
      素材若屬於一個還沒有 Map 的領域，就開一張新 Map 收納它。
@@ -43,5 +43,5 @@
      **不要動任何 `<!--SR:...-->` 註解**，那是複習排程。
    - 寫 `vault/Daily/!`date +%F`.md`（模板 `vault/_meta/Templates/Daily Report.md`）：
      做了什麼、為什麼這樣選、明日候選。
-5. **自我驗收** — 跑 `python3 tools/vault.py lint`，修到 0 error。
+5. **自我驗收** — 跑 `"$KM_PYTHON" tools/vault.py lint`，修到 0 error。
    **不要執行 git commit 或 push**，外層腳本會處理。

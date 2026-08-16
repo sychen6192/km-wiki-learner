@@ -31,6 +31,14 @@ jobs:
           curl -fsSL https://opencode.ai/install | bash
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
+      # Without these, a scanned PDF dropped into Raw/ is silently unreadable on
+      # CI even though it works on the laptop. Add language packs here to match
+      # the material you actually feed it.
+      - name: Install document tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq poppler-utils tesseract-ocr tesseract-ocr-jpn
+
       - name: Configure git identity
         run: |
           git config user.name "km-wiki-bot"

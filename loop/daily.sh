@@ -12,6 +12,8 @@
 #   KM_AGENT_CMD  agent CLI to hand the prompt to (default: opencode run --auto;
 #                 a headless agent must be allowed to approve its own writes)
 #   KM_MODEL      model override, e.g. anthropic/claude-sonnet-4-5
+#   KM_PYTHON     interpreter for the toolkit (default: first of python3/python/py
+#                 that actually runs — `python3` is a stub on Windows)
 #   KM_MAX_ITEMS  work-item budget per run (default 3)
 #   KM_TOPIC      deep-dive this topic instead of running the daily loop
 #   KM_TIMEOUT    seconds before the agent run is killed (default 3600)
@@ -21,6 +23,26 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
+
+# Which interpreter is "python3" is not a question `command -v` can answer: on
+# Windows the name resolves to a Microsoft Store stub that prints nothing and
+# exits 49, so the only honest test is to run something. Resolved once here and
+# exported, so the tools, the prompt templates and the agent all use the same
+# interpreter. Override with KM_PYTHON when you want a specific one.
+if [[ -z "${KM_PYTHON:-}" ]]; then
+    for candidate in python3 python py; do
+        if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c '' >/dev/null 2>&1; then
+            KM_PYTHON="$candidate"
+            break
+        fi
+    done
+fi
+if [[ -z "${KM_PYTHON:-}" ]]; then
+    echo "km-wiki: 找不到可用的 Python（試過 python3／python／py）。裝好之後再跑，或設 KM_PYTHON=..." >&2
+    exit 1
+fi
+export KM_PYTHON
+
 DATE="$(date +%F)"
 mkdir -p loop/logs loop/state loop/local
 LOG="loop/logs/$DATE.log"
@@ -82,7 +104,7 @@ run_agent() {
     local template="$1" timeout_s="$2"
     shift 2
     local rendered="loop/state/prompt-$DATE.md"
-    python3 tools/render.py --raw "$template" "$@" > "$rendered"
+    "$KM_PYTHON" tools/render.py --raw "$template" "$@" > "$rendered"
     log "prompt rendered to $rendered ($(wc -c < "$rendered") bytes)"
 
     # --auto is what makes opencode approve its own file writes when no human is
@@ -108,8 +130,8 @@ log "km-wiki loop starting in $REPO"
 if [[ -z "${KM_NO_PULL:-}" ]] && git remote get-url origin >/dev/null 2>&1; then
     git pull --rebase --autostash 2>&1 | tee -a "$LOG" || log "WARN: pull failed, continuing with local state"
 fi
-python3 tools/extract.py 2>&1 | tee -a "$LOG" || log "WARN: extraction had problems; the report lists them"
-python3 tools/vault.py scan --out loop/state/scan.json | tee -a "$LOG"
+"$KM_PYTHON" tools/extract.py 2>&1 | tee -a "$LOG" || log "WARN: extraction had problems; the report lists them"
+"$KM_PYTHON" tools/vault.py scan --out loop/state/scan.json | tee -a "$LOG"
 
 # --- agent -------------------------------------------------------------------
 AGENT_FAILED=""
@@ -133,14 +155,14 @@ else
 fi
 
 # --- postflight --------------------------------------------------------------
-python3 tools/vault.py stats | tee -a "$LOG" || true
-if ! python3 tools/vault.py lint 2>&1 | tee -a "$LOG"; then
+"$KM_PYTHON" tools/vault.py stats | tee -a "$LOG" || true
+if ! "$KM_PYTHON" tools/vault.py lint 2>&1 | tee -a "$LOG"; then
     log "lint failed — attempting one repair pass"
     if [[ -z "${KM_SKIP_AGENT:-}" ]]; then
         run_agent prompts/garden.md 900 || log "WARN: repair pass exited non-zero"
     fi
-    python3 tools/vault.py stats >/dev/null 2>&1 || true
-    python3 tools/vault.py lint 2>&1 | tee -a "$LOG" \
+    "$KM_PYTHON" tools/vault.py stats >/dev/null 2>&1 || true
+    "$KM_PYTHON" tools/vault.py lint 2>&1 | tee -a "$LOG" \
         || log "WARN: lint still failing — committing anyway so a human can review the diff"
 fi
 

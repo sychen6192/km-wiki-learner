@@ -20,6 +20,7 @@ Plain text and .docx need nothing beyond the standard library.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -29,6 +30,14 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
+
+# A Windows console defaults to a legacy ANSI codepage (cp950 on a Traditional
+# Chinese machine), which cannot encode a Japanese filename — printing the
+# report would crash the whole extraction. The material decides the alphabet
+# here, not the machine's locale.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 REPO = Path(__file__).resolve().parent.parent
 RAW = REPO / "vault" / "Raw"
@@ -48,7 +57,29 @@ def have(tool: str) -> bool:
 
 
 def run(cmd, **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=600, **kw)
+    # pdftotext and tesseract emit UTF-8. Letting Python guess from the locale
+    # instead throws away the Japanese it just spent a minute recognising.
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=600, **kw)
+
+
+@contextlib.contextmanager
+def staged_for_external_tools(path: Path):
+    """Hand pdftotext/tesseract a path they can actually open.
+
+    On Windows they resolve arguments through the legacy ANSI codepage, so a
+    file the human named `N4語彙マスター_6.pdf` arrives mangled and they refuse
+    it — a failure that looks exactly like a PDF with no text layer, sending
+    the report off blaming the wrong thing. Copying the bytes under an ASCII
+    name sidesteps the whole question, and is a no-op for names already fine.
+    """
+    if str(path).isascii():
+        yield path
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        staged = Path(tmp) / f"staged{path.suffix.lower()}"
+        shutil.copyfile(path, staged)
+        yield staged
 
 
 def ocr_languages() -> str:
@@ -85,6 +116,10 @@ def from_pdf(path: Path):
     text = done.stdout
     if len(text.strip()) >= OCR_THRESHOLD:
         return text, "pdftotext"
+    # No text does not always mean "scanned". A damaged or unreadable file also
+    # comes back empty, and quietly OCRing it would bury the real reason.
+    if not text.strip() and done.returncode != 0:
+        raise RuntimeError(f"pdftotext 讀不了這個檔：{done.stderr.strip()[:200] or '未知錯誤'}")
     # Too little text: this is a scan, so rasterise the pages and OCR them.
     if not (have("pdftoppm") and have("tesseract")):
         raise RuntimeError("PDF 沒有文字層（掃描件），需要 pdftoppm + tesseract 才能 OCR")
@@ -111,12 +146,12 @@ def from_image(path: Path):
 
 def extract(path: Path):
     suffix = path.suffix.lower()
-    if suffix == ".pdf":
-        return from_pdf(path)
     if suffix == ".docx":
-        return from_docx(path)
-    if suffix in IMAGE_SUFFIXES:
-        return from_image(path)
+        return from_docx(path)  # stdlib zipfile, so any filename opens fine
+    if suffix == ".pdf" or suffix in IMAGE_SUFFIXES:
+        reader = from_pdf if suffix == ".pdf" else from_image
+        with staged_for_external_tools(path) as usable:
+            return reader(usable)
     raise RuntimeError(f"還不支援 {suffix} 格式，請自行轉成文字後再放進 Raw/")
 
 

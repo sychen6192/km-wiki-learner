@@ -5,7 +5,7 @@
 ## Vault 現況（避免重複造頁）
 
 ```json
-!`python3 tools/vault.py scan`
+!`"$KM_PYTHON" tools/vault.py scan`
 ```
 
 ## 要做的事
@@ -19,4 +19,4 @@
      交給之後的迴圈長出來。
    - 對應的 `vault/Review/` 複習檔補 1–3 張卡；筆記設 `review_after`（+7 天）。
 3. 在 `vault/Daily/!`date +%F`.md` 追加一節「隨選學習」記錄成果（檔案不存在就建立）。
-4. 跑 `python3 tools/vault.py lint` 修到 0 error。**不要 git commit 或 push。**
+4. 跑 `"$KM_PYTHON" tools/vault.py lint` 修到 0 error。**不要 git commit 或 push。**
