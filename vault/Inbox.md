@@ -6,7 +6,7 @@
 
 ## 待學清單
 
-- [x] 消化 `Raw/` 裡剩下的 U16–U20 實戰演練素材，把出現的文法點各寫一頁 → [[N4語彙マスター_8_実践演習U16-U20]]
+- [ ] 消化 `Raw/` 裡剩下的 U16–U20 實戰演練素材，把出現的文法點各寫一頁
 - [x] Transformer 的 KV cache：它到底省了什麼、代價是什麼？ → [[KV cache]]
 - [x] Zettelkasten 和 PARA 方法的差異，哪個適合工程師？ → [[PKM Methods Comparison]]
 
