@@ -8,27 +8,19 @@
 
 - 📥 [[Inbox]] — 把想學的主題、問題、連結丟進來（手機上用 Obsidian 編輯即可）
 - 📦 `Raw/` — 丟網頁剪藏、論文、檔案進來，迴圈會消化成 `Sources/` 摘要（說明見 `Raw/_about.md`）
-- 🗾 [[日本語 N4]] — JLPT N4 學習地圖（文法、單字、課程講義）
-- 🗺️ [[Knowledge Engineering]] — 這座維基自身的方法論
-- 🃏 複習卡：[[日本語 N4 複習]] · [[Flashcards]]（相容 obsidian-spaced-repetition）
+- 🗺️ [[Knowledge Engineering]] — 這座維基自身的方法論（新領域會自己長出新的 Map）
+- 🃏 [[Flashcards]] — 複習卡，相容 obsidian-spaced-repetition
 - 📓 每日報告在 `Daily/`，維基每天學了什麼、為什麼，全部留痕
 
 <!-- km:stats:start -->
-> [!info] 圖書館現況 · 2026-08-15
-> 筆記 **9** 篇 — 🌱 seed 0 · 🌿 budding 5 · 🌳 evergreen 4
-> 待長出的連結（frontier）**23** · 到期複習 **0** · Inbox 待辦 **5** · Raw 待消化 **0**
+> [!info] 圖書館現況 · 2026-08-16
+> 筆記 **7** 篇 — 🌱 seed 0 · 🌿 budding 4 · 🌳 evergreen 3
+> 待長出的連結（frontier）**3** · 到期複習 **0** · Inbox 待辦 **3** · Raw 待消化 **0**
 
 **知識前緣** — 已被引用但還不存在的頁面（明日候選）：
 - [[Digital Garden]] ×5
 - [[Agent Harness]] ×4
 - [[Andrej Karpathy]] ×3
-- [[たほうがいい]] ×3
-- [[てはいけない]] ×3
-- [[てもいい]] ×2
-- [[て形]] ×2
-- [[ない形]] ×2
-- [[N4 漢字]] ×1
-- [[あげる もらう くれる]] ×1
 
 **最近的每日報告**：[[2026-08-14]]
 
