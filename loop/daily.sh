@@ -24,24 +24,11 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
-# Which interpreter is "python3" is not a question `command -v` can answer: on
-# Windows the name resolves to a Microsoft Store stub that prints nothing and
-# exits 49, so the only honest test is to run something. Resolved once here and
-# exported, so the tools, the prompt templates and the agent all use the same
-# interpreter. Override with KM_PYTHON when you want a specific one.
-if [[ -z "${KM_PYTHON:-}" ]]; then
-    for candidate in python3 python py; do
-        if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c '' >/dev/null 2>&1; then
-            KM_PYTHON="$candidate"
-            break
-        fi
-    done
-fi
-if [[ -z "${KM_PYTHON:-}" ]]; then
-    echo "km-wiki: 找不到可用的 Python（試過 python3／python／py）。裝好之後再跑，或設 KM_PYTHON=..." >&2
-    exit 1
-fi
-export KM_PYTHON
+# Resolved once here and exported, so the tools, the prompt templates and the
+# agent all use the same interpreter. Why it cannot just be `python3`: see
+# scripts/python.sh.
+# shellcheck source=scripts/python.sh
+source "$REPO/scripts/python.sh"
 
 DATE="$(date +%F)"
 mkdir -p loop/logs loop/state loop/local
@@ -71,7 +58,13 @@ CHILD_PID=""
 lock_idle_seconds() {
     local newest=0 stamp
     for target in "$BEAT" "$LOCK"; do
-        stamp="$(date -r "$target" +%s 2>/dev/null || echo 0)"   # -r: GNU and BSD
+        # Not `date -r`: GNU reads it as a path, BSD/macOS as epoch seconds, so
+        # on macOS both lookups fail, newest stays 0, and every live lock reads
+        # as abandoned — reinstating the concurrent-run bug this lock exists to
+        # prevent. Python is already a hard requirement and answers the same
+        # question identically everywhere.
+        stamp="$("$KM_PYTHON" -c 'import os,sys;print(int(os.path.getmtime(sys.argv[1])))' \
+                 "$target" 2>/dev/null || echo 0)"
         (( stamp > newest )) && newest="$stamp"
     done
     (( newest == 0 )) && { echo 999999; return; }
@@ -234,7 +227,11 @@ if [[ -z "${KM_SKIP_AGENT:-}" ]]; then
     else
         run_agent prompts/daily.md "${KM_TIMEOUT:-3600}" || AGENT_FAILED=1
     fi
-    if [[ -n "$AGENT_FAILED" ]]; then
+    # `${x:-}` rather than `$x`: under `set -u` a bare read of an unset name
+    # aborts the run at the point where it is about to report what went wrong,
+    # replacing a useful warning with "unbound variable". The default costs
+    # nothing and cannot misfire.
+    if [[ -n "${AGENT_FAILED:-}" ]]; then
         log "WARN: agent run exited non-zero — whatever it left behind is still validated"
         log "WARN: and committed, but this run's commit reflects little or no agent work"
     fi

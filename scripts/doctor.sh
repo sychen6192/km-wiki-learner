@@ -12,16 +12,9 @@ warn() { printf '  ⚠️  %s\n' "$*"; }
 bad()  { printf '  ❌ %s\n' "$*"; problems=$((problems + 1)); }
 
 echo "必要條件"
-# Being on PATH is not the same as working: Windows ships a `python3` that is a
-# Microsoft Store shortcut, printing nothing and exiting 49. Run it to find out.
-if [[ -z "${KM_PYTHON:-}" ]]; then
-    for candidate in python3 python py; do
-        if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c '' >/dev/null 2>&1; then
-            KM_PYTHON="$candidate"
-            break
-        fi
-    done
-fi
+# Being on PATH is not the same as working — see scripts/python.sh. Failure is
+# reported rather than fatal here, because listing the rest is the whole job.
+source "$REPO/scripts/python.sh" 2>/dev/null || true
 if [[ -n "${KM_PYTHON:-}" ]]; then
     ok "Python — $("$KM_PYTHON" --version 2>&1)（KM_PYTHON=$KM_PYTHON）"
     if [[ "$KM_PYTHON" != "python3" ]] && command -v python3 >/dev/null 2>&1; then

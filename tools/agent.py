@@ -86,7 +86,10 @@ def resolve(rel: str, *, for_write: bool) -> Path:
             raise ToolError(f"拒絕：只能寫在 vault/ 底下（收到 {rel}）{suggestion}")
         if path == RAW or RAW in path.parents:
             raise ToolError(f"拒絕：Raw/ 是不可變素材層，只能讀（{rel}）")
-        if path.suffix.lower() not in (".md", ".json", ""):
+        # Markdown only. `.json` and extensionless were allowed for no stated
+        # reason while the refusal below claimed otherwise — and between them
+        # they put vault/.obsidian/*.json within reach of the librarian.
+        if path.suffix.lower() != ".md":
             raise ToolError(f"拒絕：只能寫 .md（收到 {rel}）")
     return path
 
@@ -114,6 +117,24 @@ def guard_overwrite(path: Path, new_text: str) -> None:
 
 # --- tools -------------------------------------------------------------------
 
+def nearby(rel: str) -> str:
+    """Suggest the path the model probably meant.
+
+    It guesses the root in both directions — `vault/AGENTS.md` for a file at
+    the repo root, `Notes/Foo.md` for one inside the vault — and a bare "not
+    found" gives it nothing to correct with. Observed: a run asked for
+    `vault/AGENTS.md` twice, was refused twice, and gave up having written
+    nothing. Naming the real path costs one glob and it recovers next turn.
+    """
+    name = Path(str(rel)).name
+    if not name:
+        return ""
+    found = [p.relative_to(REPO).as_posix()
+             for p in REPO.glob(f"**/{name}")
+             if p.is_file() and ".git" not in p.parts][:3]
+    return f"（也許你要的是：{'、'.join(found)}）" if found else ""
+
+
 def tool_list_dir(path: str = "vault") -> str:
     target = resolve(path, for_write=False)
     if not target.is_dir():
@@ -129,7 +150,7 @@ def tool_list_dir(path: str = "vault") -> str:
 def tool_read_file(path: str) -> str:
     target = resolve(path, for_write=False)
     if not target.is_file():
-        raise ToolError(f"找不到檔案：{path}")
+        raise ToolError(f"找不到檔案：{path}{nearby(path)}")
     text = target.read_text(encoding="utf-8", errors="replace")
     if len(text) > MAX_READ_CHARS:
         return text[:MAX_READ_CHARS] + f"\n\n[...截斷，全長 {len(text)} 字]"

@@ -2,22 +2,16 @@
 .PHONY: doctor daily learn prompt extract scan lint stats seed test unlock install-cron install-systemd
 
 # On Windows `python3` is on PATH but is a Microsoft Store shortcut that runs
-# nothing, so the name has to be tested rather than trusted. Override with
-# `make PY=/path/to/python ...` if you want a specific interpreter.
-PY ?= $(shell for c in python3 python py; do if command -v $$c >/dev/null 2>&1 && $$c -c '' >/dev/null 2>&1; then echo $$c; break; fi; done)
+# nothing, so the name has to be tested rather than trusted. The probe lives in
+# one place; override with `make PY=/path/to/python ...` for a specific one.
+PY ?= $(shell ./scripts/python.sh)
 export KM_PYTHON = $(PY)
 
 doctor:           ## check this machine can run the loop, and what's missing
 	./scripts/doctor.sh
 
 unlock:           ## clear a stuck lock left by an interrupted run
-	@if [ -d loop/state/lock ]; then \
-		pid=$$(cat loop/state/lock/pid 2>/dev/null || echo unknown); \
-		if ps -p "$$pid" -o command= 2>/dev/null | grep -q daily.sh; then \
-			echo "還在跑（pid $$pid）。真的要停就: kill $$pid"; exit 1; \
-		fi; \
-		rm -rf loop/state/lock && echo "已清除殘留的鎖（原持有者 pid $$pid）"; \
-	else echo "沒有鎖，不用清"; fi
+	./scripts/unlock.sh
 
 daily:            ## run the full daily loop now
 	./loop/daily.sh

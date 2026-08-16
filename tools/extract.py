@@ -133,6 +133,20 @@ def extraction_recipe() -> str:
     return "|".join(["ocr", ocr_languages(), dpi])
 
 
+def reusable(entry: dict, recipe: str) -> bool:
+    """Would re-running now produce what is already cached?
+
+    Matching the recipe alone is not enough, because the recipe records what
+    was *asked for*. A vision run that fell back to OCR is stored under the
+    vision recipe holding OCR output, and calling that a hit would freeze one
+    server hiccup into the permanent answer — the next run matches, skips the
+    work, and the noise never leaves. So the fallback has to be visible here.
+    """
+    if entry.get("status") != "ok" or entry.get("recipe") != recipe:
+        return False
+    return recipe.startswith("vision") == str(entry.get("method", "")).startswith("vision")
+
+
 def ask_vision(image: Path) -> str:
     """Transcribe one page image with the configured vision model."""
     base = os.environ.get("KM_API_BASE", "http://localhost:11434").rstrip("/")
@@ -289,7 +303,9 @@ def report(entries: dict) -> str:
         if e["status"] == "text":
             lines.append(f"{rel} — 純文字，直接讀原檔（{e['chars']} 字）")
         elif e["status"] == "ok":
-            lines.append(f"{rel} — 已抽出文字：{e['text']}（{e['method']}，{e['chars']} 字）")
+            how = e["method"] + ("，快取" if e.get("cached") else "")
+            note = f"　※ {e['note']}" if e.get("note") else ""
+            lines.append(f"{rel} — 已抽出文字：{e['text']}（{how}，{e['chars']} 字）{note}")
         else:
             lines.append(f"{rel} — ⚠️ 無法讀取：{e['note']}")
     return "\n".join(lines)
@@ -318,12 +334,17 @@ def main(argv) -> int:
 
         target = OUT / (path.relative_to(RAW).as_posix().replace("/", "__") + ".txt")
         if (target.exists() and target.stat().st_mtime >= path.stat().st_mtime
-                and previous.get(rel, {}).get("recipe") == recipe):
+                and reusable(previous.get(rel, {}), recipe)):
             entries[rel] = {
                 "status": "ok",
                 "text": target.relative_to(REPO).as_posix(),
-                "method": "cached",
+                # Keep the method that actually produced the text. Overwriting
+                # it with "cached" loses the only record of how the file was
+                # read, and the run after that can no longer tell OCR output
+                # from a vision transcript.
+                "method": previous[rel]["method"],
                 "recipe": recipe,
+                "cached": True,
                 "chars": len(target.read_text(encoding="utf-8", errors="replace")),
             }
             continue
@@ -331,8 +352,23 @@ def main(argv) -> int:
         try:
             text, method = extract(path)
         except Exception as exc:  # noqa: BLE001 — every failure is reportable, not fatal
-            entries[rel] = {"status": "failed", "text": None, "method": None,
-                            "chars": 0, "note": str(exc)}
+            entry = {"status": "failed", "text": None, "method": None,
+                     "chars": 0, "note": str(exc)}
+            # Text extracted earlier is still on disk and still readable. A
+            # missing tool today must not retract material that was already
+            # read, or the prompt starts telling the agent the source is
+            # unreadable while a good transcript sits next to it.
+            if target.exists() and previous.get(rel, {}).get("status") == "ok":
+                entry = {
+                    "status": "ok",
+                    "text": target.relative_to(REPO).as_posix(),
+                    "method": previous[rel]["method"],
+                    "recipe": previous[rel].get("recipe", ""),
+                    "cached": True,
+                    "chars": len(target.read_text(encoding="utf-8", errors="replace")),
+                    "note": f"沿用先前的抽取結果（這次重抽失敗：{exc}）",
+                }
+            entries[rel] = entry
             continue
 
         if not text.strip():
@@ -340,12 +376,19 @@ def main(argv) -> int:
                             "chars": 0, "note": "抽出來是空的（可能是空白頁或辨識失敗）"}
             continue
 
-        target.write_text(text, encoding="utf-8")
+        # newline="" disables the platform translation `write_text` would apply.
+        # Without it Windows rewrites every \n as \r\n, so the file no longer
+        # holds the text that was extracted, the reported size stops matching
+        # what a later read returns, and the same PDF yields different bytes on
+        # different machines.
+        with target.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
         entries[rel] = {
             "status": "ok",
             "text": target.relative_to(REPO).as_posix(),
             "method": method,
             "recipe": recipe,
+            "cached": False,
             "chars": len(text),
         }
 

@@ -124,7 +124,22 @@ vault/**/*.md ──vault.py scan──▶ scan.json │
 | `KM_RASTER_DPI` | 200 | 掃描件轉圖解析度（**教材建議 300**） |
 | `KM_VISION_MAX_PAGES` | 0（全部） | 先試幾頁 |
 | `KM_LOCK_STALE_SEC` | 120 | 心跳停多久算廢鎖 |
+| `KM_HEARTBEAT_SEC` | 30 | 持有者多久 touch 一次心跳 |
+| `KM_TOPIC` | — | 設了就跑隨選深潛（`prompts/learn.md`）而非每日迴圈 |
+| `KM_OCR_LANG` | 自動偵測 | 覆寫 tesseract 語言，如 `jpn+eng` |
+| `KM_VISION_TIMEOUT` | 900 | vision 每頁的秒數上限 |
+| `KM_SHELL` | 自動找 `bash` | `render.py` 展開 `` !`…` `` 用的 shell |
+
+`tools/agent.py`（內建 runner）另外讀這些：
+
+| 變數 | 預設 | 作用 |
+|---|---|---|
 | `KM_API_BASE` | `http://localhost:11434` | 模型 endpoint |
+| `KM_API_STYLE` | `ollama` | `ollama`（原生 `/api/chat`）或 `openai` |
+| `KM_API_KEY` | — | 有設就帶 `Authorization: Bearer` |
+| `KM_NUM_CTX` | 32768 | context 視窗（**只有 ollama 格式能指定**） |
+| `KM_MAX_STEPS` | 60 | 工具呼叫次數上限，防無限迴圈 |
+| `KM_HTTP_TIMEOUT` | 900 | 每次模型請求的秒數上限 |
 
 ---
 
@@ -160,7 +175,8 @@ vault/**/*.md ──vault.py scan──▶ scan.json │
 | PowerShell 的 `bash` 是 Git Bash | `C:\WINDOWS\system32\bash.exe`＝WSL | 要寫完整路徑 `& 'C:\Program Files\Git\bin\bash.exe'` |
 | `kill -0 $pid` 能判斷存活 | **兩個 Git Bash 實例的 MSYS pid namespace 是分開的**，互相看不到 | 鎖改用心跳，不問 pid |
 | `taskkill /T` 會殺掉整棵樹 | MSYS 的 POSIX process tree 在 Windows 端不存在；agent 不是 subshell 的 Windows 子行程 | 在 MSYS 端遞迴走 tree，逐一收掉 |
-| Python 印中日文沒問題 | stdout 走 cp950，遇日文直接 crash | 三個工具都 `reconfigure(encoding='utf-8')` |
+| Python 印中日文沒問題 | stdout 走 cp950，遇日文直接 crash | `tools/` 四支都 `reconfigure(encoding='utf-8')` |
+| `date -r file` 到處都能取 mtime | GNU 讀成路徑，BSD／macOS 讀成 epoch 秒數 | 用 Python 取 mtime，兩邊語意才一致 |
 | `subprocess(shell=True)` 是 sh | Windows 上是 **cmd.exe**，`date +%F`、`${VAR:-x}` 全爆 | `render.py` 明確指定 bash |
 | 外部工具開得了任何檔名 | `pdftotext` 走 ANSI codepage，日文檔名開不了——而且錯誤長得像「PDF 沒有文字層」 | 非 ASCII 檔名先複製成 ASCII 暫存檔 |
 | `VAR=x time cmd` 會計時 | 環境變數前綴後面**一定當命令查**，`time` 不再是 keyword | 用 `SECONDS=0; cmd; echo $SECONDS` |
@@ -188,3 +204,8 @@ Git Bash 視窗被滑鼠點過會進入選取模式（QuickEdit），**凍結所
 
 鎖卡住用 `make unlock`。心跳超過 `KM_LOCK_STALE_SEC` 的話下一圈會自己回收，
 並把回收原因寫進日誌。
+
+> ⚠️ **迴圈跑的時候不要改 `loop/daily.sh`。** bash 是邊讀邊執行的，它記的是檔案裡的
+> 位移量而不是行號；跑到一半把前面的內容加長或縮短，它接下來會從錯誤的位置繼續讀，
+> 冒出指向無辜行號的怪錯誤（例如某個明明有賦值的變數說 unbound）。一圈要跑數十分鐘，
+> 這個窗口比想像中大。改完等下一圈再跑。

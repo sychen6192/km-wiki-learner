@@ -95,10 +95,12 @@ make daily                                  # = ./loop/daily.sh
   （純 completion 的模型寫不了檔案，也就長不了 vault）：
   ```bash
   KM_API_BASE=http://llm:11434 KM_MODEL=qwen3.6:35b-a3b \
-    KM_AGENT_CMD="python3 tools/agent.py" ./loop/daily.sh
+    KM_AGENT_CMD="python tools/agent.py" ./loop/daily.sh
   ```
+  （`KM_AGENT_CMD` 是原樣執行的字串，不會替你解析直譯器 — Windows 上要寫 `python`，
+  `python3` 在那裡是個什麼都不做的空殼。）
   預設講 Ollama 的 `/api/chat`（這樣才能指定 `KM_NUM_CTX`，避免 context 被默默砍掉）；
-  `KM_API_STYLE=openai` 可改用 OpenAI 相容端點。模型拿不到 shell，只能讀寫 repo 內的
+  `KM_API_STYLE=openai` 可改用 OpenAI 相容端點。模型拿不到 shell，只能寫 `vault/` 底下的
   `.md`、跑 vault 工具；`Raw/` 唯讀，`locked: true` 與 `<!--SR:...-->` 有防呆擋著。
 - **權限**：repo 內沒有任何 agent 設定檔，權限限制放你的全域設定（見 [WALKTHROUGH](docs/WALKTHROUGH.md) 的「安全邊界」）。git 寫入一律由外層腳本執行，agent 改不動歷史。
 - **寫作規範**：`vault/_meta/Style Guide.md` 是憲法，`tools/vault.py lint` 是執法者。
