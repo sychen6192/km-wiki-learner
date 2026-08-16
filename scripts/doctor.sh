@@ -97,6 +97,16 @@ if command -v tesseract >/dev/null 2>&1; then
 else
     warn "沒有 tesseract，掃描件／照片無法辨識（macOS: brew install tesseract tesseract-lang / Windows: winget install UB-Mannheim.TesseractOCR）"
 fi
+if [[ -n "${KM_VISION_MODEL:-}" ]]; then
+    vision_base="${KM_API_BASE:-http://localhost:11434}"
+    if curl -fsS -m 5 "$vision_base/api/tags" >/dev/null 2>&1; then
+        ok "vision — 掃描件交給 $KM_VISION_MODEL 逐頁轉錄（$vision_base 連得上）"
+    else
+        warn "設了 KM_VISION_MODEL 但連不上 $vision_base，掃描件會退回 OCR"
+    fi
+else
+    warn "沒設 KM_VISION_MODEL，掃描件走 OCR。密排小字的教材建議改用 vision，OCR 的雜訊會讓模型自行腦補"
+fi
 
 echo
 echo "專案狀態"

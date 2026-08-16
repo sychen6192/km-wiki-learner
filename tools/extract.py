@@ -16,10 +16,22 @@ External tools are used when present and reported honestly when not:
   pdftotext, pdftoppm (poppler)   PDF text and page rasterising
   tesseract                       OCR for scans and images
 Plain text and .docx need nothing beyond the standard library.
+
+A scan can also be read by a vision model instead of OCR, which is the better
+option when the page is dense or multilingual — OCR returns confident noise on
+material like that, and noise is what a downstream model quietly invents around.
+Set KM_VISION_MODEL and the pages go to KM_API_BASE as images; leave it unset
+and nothing changes. OCR remains the fallback if the model cannot be reached.
+
+    KM_VISION_MODEL      e.g. qwen3.8:27b — unset means OCR, as before
+    KM_API_BASE          Ollama-compatible server (default http://localhost:11434)
+    KM_VISION_MAX_PAGES  stop after N pages (0 = all); a page takes minutes
+    KM_VISION_TIMEOUT    seconds per page (default 900)
 """
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
 import os
@@ -28,6 +40,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -50,6 +64,23 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 # A PDF yielding less than this many characters is almost certainly scanned.
 OCR_THRESHOLD = 80
 OCR_PREFERENCE = ("jpn", "chi_tra", "chi_sim", "kor", "eng")
+RASTER_DPI = 200
+
+# Written against a model that had just invented a textbook's contents rather
+# than admit it could not read the page. Every clause below is load-bearing:
+# transcription only, an explicit way to say "unreadable", and no room to be
+# helpful. A gap the model reports is recoverable; a gap it fills is not.
+VISION_PROMPT = """這是掃描的教材頁面。請逐字轉錄你在圖片上「實際看到」的內容，保持原本的排列順序。
+
+規則：
+1. 只寫圖片上真的有的字。看不清楚的地方寫 [不清楚]，**絕對不要猜、不要推測**。
+2. 不要總結、不要解釋、不要補充任何背景知識或你認為應該出現的內容。
+3. 日文保留漢字與假名原樣。標音（ふりがな）字很小，**只有在你確實看得清楚時**
+   才寫在該詞後面的括號內；看不清楚就只寫漢字，**不要用你的日文知識推測讀音**。
+4. 表格或多欄排版就逐列轉錄，欄位之間用 | 分隔。譯文欄（中／英／韓／越）也要轉錄。
+5. 這是轉錄工作，不是理解工作。你的輸出應該只包含頁面上的文字。
+
+如果整頁都無法辨識，只回覆：[這頁讀不到]"""
 
 
 def have(tool: str) -> bool:
@@ -80,6 +111,81 @@ def staged_for_external_tools(path: Path):
         staged = Path(tmp) / f"staged{path.suffix.lower()}"
         shutil.copyfile(path, staged)
         yield staged
+
+
+def vision_model() -> str:
+    return os.environ.get("KM_VISION_MODEL", "").strip()
+
+
+def ask_vision(image: Path) -> str:
+    """Transcribe one page image with the configured vision model."""
+    base = os.environ.get("KM_API_BASE", "http://localhost:11434").rstrip("/")
+    payload = {
+        "model": vision_model(),
+        "stream": False,
+        "options": {"num_ctx": int(os.environ.get("KM_NUM_CTX", "32768"))},
+        "messages": [{
+            "role": "user",
+            "content": VISION_PROMPT,
+            "images": [base64.b64encode(image.read_bytes()).decode()],
+        }],
+    }
+    request = urllib.request.Request(
+        f"{base}/api/chat", data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST")
+    key = os.environ.get("KM_API_KEY")
+    if key:
+        request.add_header("Authorization", f"Bearer {key}")
+    timeout = int(os.environ.get("KM_VISION_TIMEOUT", "900"))
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))["message"]["content"]
+
+
+def read_pages(pages: list):
+    """Turn page images into text — vision when configured, OCR otherwise."""
+    if vision_model():
+        try:
+            return vision_pages(pages)
+        except (urllib.error.URLError, OSError, KeyError, ValueError, RuntimeError) as exc:
+            # Losing the material because a server blinked would be worse than
+            # reading it badly, so fall through to OCR and say so in the method.
+            print(f"    vision 失敗（{exc}），改用 OCR", file=sys.stderr)
+    if not have("tesseract"):
+        raise RuntimeError("掃描件需要 tesseract 才能 OCR，或設 KM_VISION_MODEL 用視覺模型讀")
+    langs = ocr_languages()
+    chunks = [run(["tesseract", str(page), "-", "-l", langs]).stdout for page in pages]
+    return "\n\n".join(chunks), f"ocr:{langs}"
+
+
+def vision_pages(pages: list):
+    limit = int(os.environ.get("KM_VISION_MAX_PAGES", "0")) or len(pages)
+    used = pages[:limit]
+    chunks = []
+    failures = 0
+    for number, page in enumerate(used, start=1):
+        print(f"    vision 第 {number}/{len(used)} 頁…", file=sys.stderr)
+        try:
+            body = ask_vision(page).strip()
+        except (urllib.error.URLError, OSError, KeyError, ValueError) as exc:
+            # One bad page must not discard the good ones. At minutes apiece,
+            # restarting a whole book because the server hiccuped on page 18 is
+            # an hour thrown away — and the gap is named, so nothing downstream
+            # mistakes a missing page for a blank one.
+            failures += 1
+            body = f"[這頁沒讀到：{exc}]"
+            print(f"      第 {number} 頁失敗：{exc}", file=sys.stderr)
+        chunks.append(f"--- page {number} ---\n{body}")
+    if failures == len(used):
+        raise RuntimeError(f"vision 每一頁都失敗（共 {failures} 頁）")
+    if len(used) < len(pages):
+        # Saying so matters: a silent stop reads downstream as "this is the
+        # whole document", and the rest of the book quietly stops existing.
+        chunks.append(f"[只轉錄了前 {len(used)} 頁，全檔共 {len(pages)} 頁。"
+                      f"調高 KM_VISION_MAX_PAGES 可讀更多]")
+    method = f"vision:{vision_model()}"
+    if failures:
+        method += f"（{failures}/{len(used)} 頁失敗）"
+    return "\n\n".join(chunks), method
 
 
 def ocr_languages() -> str:
@@ -120,28 +226,20 @@ def from_pdf(path: Path):
     # comes back empty, and quietly OCRing it would bury the real reason.
     if not text.strip() and done.returncode != 0:
         raise RuntimeError(f"pdftotext 讀不了這個檔：{done.stderr.strip()[:200] or '未知錯誤'}")
-    # Too little text: this is a scan, so rasterise the pages and OCR them.
-    if not (have("pdftoppm") and have("tesseract")):
-        raise RuntimeError("PDF 沒有文字層（掃描件），需要 pdftoppm + tesseract 才能 OCR")
-    langs = ocr_languages()
+    # Too little text: this is a scan, so the page images are the whole content.
+    if not have("pdftoppm"):
+        raise RuntimeError("PDF 沒有文字層（掃描件），需要 pdftoppm 才能把頁面轉成圖片")
+    dpi = os.environ.get("KM_RASTER_DPI", str(RASTER_DPI))
     with tempfile.TemporaryDirectory() as tmp:
-        run(["pdftoppm", "-r", "200", "-png", str(path), f"{tmp}/page"])
+        run(["pdftoppm", "-r", dpi, "-png", str(path), f"{tmp}/page"])
         pages = sorted(Path(tmp).glob("page*.png"))
         if not pages:
             raise RuntimeError("PDF 無法轉成圖片")
-        chunks = []
-        for page in pages:
-            got = run(["tesseract", str(page), "-", "-l", langs])
-            chunks.append(got.stdout)
-    return "\n\n".join(chunks), f"ocr:{langs}"
+        return read_pages(pages)
 
 
 def from_image(path: Path):
-    if not have("tesseract"):
-        raise RuntimeError("需要 tesseract 才能辨識圖片文字（macOS: brew install tesseract tesseract-lang）")
-    langs = ocr_languages()
-    done = run(["tesseract", str(path), "-", "-l", langs])
-    return done.stdout, f"ocr:{langs}"
+    return read_pages([path])
 
 
 def extract(path: Path):

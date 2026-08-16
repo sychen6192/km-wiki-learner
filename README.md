@@ -33,7 +33,7 @@ Karpathy 的 idea file（2026-04）走紅後出現一批實作，我們逐一研
 
 1. **知識前緣（frontier）驅動生長** — dangling `[[wikilink]]` 不是錯誤，是維基的好奇心佇列。`scan` 依被引用次數排序，迴圈每天優先長出最被需要的頁面：維基沿著自己的無知邊界擴張。
 2. **確定性外骨骼、LLM 內臟** — 掃描、lint、儀表板、git 全是 stdlib Python + bash（零依賴）；LLM 的輸出必須通過 `vault.py lint`（0 error）才會被 commit。壞筆記進不了 main。
-3. **丟進去就好** — PDF、掃描件、手機拍的照片、`.docx` 直接放 `Raw/`，迴圈自動抽文字並在需要時 OCR。出題就在 `Inbox.md` 打勾選框。整個操作介面就是 Obsidian 本身，手機也能用。
+3. **丟進去就好** — PDF、掃描件、手機拍的照片、`.docx` 直接放 `Raw/`，迴圈自動抽文字，掃描件走 OCR 或交給 vision 模型逐頁轉錄（`KM_VISION_MODEL`）。出題就在 `Inbox.md` 打勾選框。整個操作介面就是 Obsidian 本身，手機也能用。
 4. **知識會留在你腦裡** — 每篇筆記自動配 flashcard（相容 [obsidian-spaced-repetition](https://github.com/st3v3nmw/obsidian-spaced-repetition)），且筆記本身有 `review_after` 排程：到期的筆記迴圈會回頭查證、更新、晉升（`seed → budding → evergreen`）。
 5. **完全留痕、完全可攜** — 每天一個 commit + 一篇 `Daily/` 報告（做了什麼、為什麼、明日候選）。全部是 markdown 檔案，Karpathy 說的 "file over app"：沒有資料庫、沒有服務、換掉任何一個工具都活得下去。
 6. **不綁任何一家 agent** — repo 裡沒有 opencode 專屬設定；prompt 是 `prompts/` 底下的純文字模板，執行器由 `KM_AGENT_CMD` 決定（`opencode run`、`claude -p`、`codex exec` 都行）。合約寫在 `AGENTS.md`，各家 CLI 都認得。
@@ -83,6 +83,10 @@ make daily                                  # = ./loop/daily.sh
 - **預算**：`KM_MAX_ITEMS`（預設 3 個工作項/天）控制成本上限。
 - **模型**：`KM_MODEL=anthropic/claude-sonnet-4-5` 之類（`provider/model` 格式，`opencode models` 可列出）。
 - **本機私有指令**：`loop/local/*.md`（gitignored）會注入每天的 prompt，優先級同 Inbox — 適合放只屬於這台機器的來源與偏好，範例見 [`loop/local.example.md`](loop/local.example.md)。
+- **掃描件用 vision 讀**：`KM_VISION_MODEL=qwen3.8:27b make extract` — 密排、小字、多語混排的
+  教材，OCR 吐的是像文字的雜訊，而下游模型會拿自己的先驗把雜訊補成一份看似合理的假摘要。
+  vision 逐頁轉錄準得多，代價是一頁 1～4 分鐘（`KM_VISION_MAX_PAGES` 可先試幾頁）。
+  連不上模型會自動退回 OCR。
 - **接上外部來源（MCP）**：讓迴圈每天自己去某個系統抓新素材，含「從哪裡抓起」的游標機制 — 見 [docs/SOURCES.md](docs/SOURCES.md)。
 - **換掉 opencode**：`KM_AGENT_CMD="claude -p" make daily` — prompt 是純文字，agent 只是執行器。
 - **接自己的模型（不裝任何 agent CLI）**：`tools/agent.py` 是內建的極簡 tool-calling
