@@ -28,6 +28,13 @@ import sys
 import unicodedata
 from pathlib import Path
 
+# Note titles come from the material, not from the machine's locale: a Windows
+# console on a legacy ANSI codepage cannot print a Japanese title and would
+# take the whole run down with it.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 VALID_STATUS = ("seed", "budding", "evergreen")
 REQUIRED_KEYS = ("status", "created", "updated")
 # Folders whose notes carry full frontmatter and participate in the graph.

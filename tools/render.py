@@ -18,10 +18,18 @@ format. Rendering is also how you read the prompt before spending a token:
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# The rendered prompt carries whatever the vault contains — Japanese, Chinese,
+# anything — so stdout must not be at the mercy of the console's codepage.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 REPO = Path(__file__).resolve().parent.parent
 SHELL_RE = re.compile(r"!`([^`]+)`")
@@ -39,11 +47,29 @@ def split_frontmatter(text: str):
 
 
 def expand_shell(text: str) -> str:
+    # A template that says `python3` gets whatever that name happens to mean on
+    # this machine — on Windows it is usually a Store stub that prints nothing
+    # and exits. The interpreter already running this file is the one that
+    # works, so templates ask for `$KM_PYTHON` and get it.
+    env = dict(os.environ)
+    env.setdefault("KM_PYTHON", sys.executable)
+
+    # Templates are written in POSIX shell — `date +%F`, `2>/dev/null || true`,
+    # `${VAR:-default}`. `shell=True` means cmd.exe on Windows, which
+    # understands none of it and would paste its own error messages into the
+    # prompt where the vault scan should be. The loop already runs on bash, so
+    # the templates get bash here too.
+    shell = os.environ.get("KM_SHELL") or shutil.which("bash")
+
     def run(match):
         cmd = match.group(1)
         try:
+            # Decode explicitly: these commands report on a vault full of
+            # non-Latin titles, and the platform default would mangle them.
             done = subprocess.run(
-                cmd, shell=True, cwd=REPO, capture_output=True, text=True, timeout=120
+                [shell, "-c", cmd] if shell else cmd, shell=not shell,
+                cwd=REPO, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=120, env=env,
             )
             return (done.stdout or done.stderr).rstrip("\n")
         except subprocess.TimeoutExpired:

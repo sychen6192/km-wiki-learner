@@ -1,6 +1,12 @@
 # km-wiki-learner — common entry points
 .PHONY: doctor daily learn prompt extract scan lint stats seed test unlock install-cron install-systemd
 
+# On Windows `python3` is on PATH but is a Microsoft Store shortcut that runs
+# nothing, so the name has to be tested rather than trusted. Override with
+# `make PY=/path/to/python ...` if you want a specific interpreter.
+PY ?= $(shell for c in python3 python py; do if command -v $$c >/dev/null 2>&1 && $$c -c '' >/dev/null 2>&1; then echo $$c; break; fi; done)
+export KM_PYTHON = $(PY)
+
 doctor:           ## check this machine can run the loop, and what's missing
 	./scripts/doctor.sh
 
@@ -21,26 +27,26 @@ learn:            ## on-demand deep dive: make learn TOPIC="KV cache"
 	KM_TOPIC="$(TOPIC)" ./loop/daily.sh
 
 prompt:           ## show the exact prompt the loop sends: make prompt [P=learn] [ARGS="..."]
-	python3 tools/render.py prompts/$(or $(P),daily).md $(ARGS)
+	$(PY) tools/render.py prompts/$(or $(P),daily).md $(ARGS)
 
 extract:          ## turn PDFs/images/docx in vault/Raw into readable text
-	python3 tools/extract.py
+	$(PY) tools/extract.py
 
 scan:             ## print the vault work report (JSON)
-	python3 tools/vault.py scan
+	$(PY) tools/vault.py scan
 
 lint:             ## validate vault structure and frontmatter
-	python3 tools/vault.py lint
+	$(PY) tools/vault.py lint
 
 stats:            ## refresh the Home.md dashboard
-	python3 tools/vault.py stats
+	$(PY) tools/vault.py stats
 
 seed:             ## create a seed note: make seed TITLE="Some Concept"
 	@test -n "$(TITLE)" || (echo 'usage: make seed TITLE="..."' && exit 1)
-	python3 tools/vault.py seed "$(TITLE)"
+	$(PY) tools/vault.py seed "$(TITLE)"
 
 test:             ## run the toolkit test suite
-	python3 -m unittest discover tests
+	$(PY) -m unittest discover tests
 
 install-cron:     ## schedule the loop via crontab (default 05:30)
 	./scripts/install-cron.sh $(TIME)
