@@ -309,4 +309,10 @@ def main(argv) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    try:
+        raise SystemExit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        # Ctrl-C is an answer, not a crash. A traceback here buries the loop's
+        # own "interrupted" message under forty lines of urllib internals.
+        print("\nagent: 中斷，已寫入的檔案留在工作區", file=sys.stderr)
+        raise SystemExit(130) from None

@@ -48,36 +48,105 @@ mkdir -p loop/logs loop/state loop/local
 LOG="loop/logs/$DATE.log"
 
 # Single-instance lock. mkdir is atomic everywhere, unlike flock which macOS
-# does not ship — and a lock whose absence silently blocks every run is worse
-# than no lock at all. A lock left behind by a killed run is reclaimed once its
-# owner is gone.
+# does not ship.
+#
+# Liveness is a heartbeat, not a pid check. "Is pid N still alive?" is the
+# obvious design and it is wrong here: two Git Bash instances started from
+# different places get separate MSYS pid namespaces, so each sees the other's
+# running loop as dead, steals the lock, and both run at once — which is how
+# two loops ended up writing the same vault. Pids are recyclable besides. A
+# file the holder keeps touching answers the question that actually matters:
+# is anyone still working?
 LOCK="loop/state/lock"
+BEAT="$LOCK/heartbeat"
+BEAT_EVERY="${KM_HEARTBEAT_SEC:-30}"
+BEAT_STALE="${KM_LOCK_STALE_SEC:-120}"
+BEAT_PID=""
+CHILD_PID=""
+
+
+# Seconds since the lock last showed a sign of life. The directory's own mtime
+# counts too, so a lock claimed microseconds ago is not mistaken for abandoned
+# in the window before its first heartbeat lands.
+lock_idle_seconds() {
+    local newest=0 stamp
+    for target in "$BEAT" "$LOCK"; do
+        stamp="$(date -r "$target" +%s 2>/dev/null || echo 0)"   # -r: GNU and BSD
+        (( stamp > newest )) && newest="$stamp"
+    done
+    (( newest == 0 )) && { echo 999999; return; }
+    echo $(( $(date +%s) - newest ))
+}
+
+# Every descendant of a pid, deepest first. Walking this by hand looks like
+# reinventing `pkill -P`, and on Windows it is the only thing that works:
+# MSYS keeps a POSIX process tree that Windows knows nothing about, so
+# `timeout.exe` and the agent are not children of the wrapping subshell as far
+# as `taskkill /T` is concerned — it ends the subshell and reports success
+# while the agent carries on writing to the vault.
+descendants_deepest_first() {
+    local kid
+    for kid in $(ps -ef 2>/dev/null | awk -v parent="$1" 'NR > 1 && $3 == parent {print $2}'); do
+        descendants_deepest_first "$kid"
+        printf '%s\n' "$kid"
+    done
+}
+
+# End one process, whatever kind it is. A native Windows program has no POSIX
+# signals for MSYS to deliver, so it needs taskkill; everything else needs the
+# signal. Doing both costs nothing and means this works on either platform.
+end_process() {
+    local pid="$1" winpid
+    winpid="$(cat "/proc/$pid/winpid" 2>/dev/null || true)"
+    if [[ -n "$winpid" ]] && command -v taskkill >/dev/null 2>&1; then
+        MSYS2_ARG_CONV_EXCL='*' taskkill /PID "$winpid" /F >/dev/null 2>&1 || true
+    fi
+    kill -KILL "$pid" 2>/dev/null || true
+}
+
+kill_child_tree() {
+    [[ -n "$CHILD_PID" ]] || return 0
+    local pid="$CHILD_PID" victim
+    CHILD_PID=""
+    printf 'km-wiki: 中止 agent（pid %s 及其子孫）\n' "$pid" | tee -a "$LOG" >&2
+    while read -r victim; do
+        [[ -n "$victim" ]] && end_process "$victim"
+    done < <(descendants_deepest_first "$pid")
+    kill -TERM "-$pid" 2>/dev/null || true      # the group, for non-Windows
+    end_process "$pid"
+}
+
+release() {
+    kill_child_tree
+    [[ -n "$BEAT_PID" ]] && kill "$BEAT_PID" 2>/dev/null
+    BEAT_PID=""
+    rm -rf "$LOCK"
+}
+
 take_lock() {
     if ! mkdir "$LOCK" 2>/dev/null; then
-        local owner stale=""
-        owner="$(cat "$LOCK/pid" 2>/dev/null || true)"
-        # Two independent ways to be stale, because either check alone can be
-        # fooled: a dead owner is obvious, but a recycled PID looks alive
-        # forever — so a lock older than any plausible run is stale regardless.
-        if [[ -z "$owner" ]] || ! kill -0 "$owner" 2>/dev/null; then
-            stale=1
-        fi
-        if [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +"${KM_LOCK_MAX_MIN:-120}" 2>/dev/null)" ]]; then
-            stale=1
-        fi
-        [[ -n "$stale" ]] || return 1
-        echo "km-wiki: reclaiming stale lock from pid ${owner:-unknown}" >&2
+        local idle
+        idle="$(lock_idle_seconds)"
+        (( idle < BEAT_STALE )) && return 1
+        printf 'km-wiki: 回收停擺的鎖（心跳停了 %ss，原持有者 %s）\n' \
+            "$idle" "$(cat "$LOCK/pid" 2>/dev/null || echo unknown)" | tee -a "$LOG" >&2
         rm -rf "$LOCK"
         mkdir "$LOCK" 2>/dev/null || return 1
     fi
-    echo $$ > "$LOCK/pid"
+    printf 'msys=%s win=%s since=%s\n' "$$" \
+        "$(cat "/proc/$$/winpid" 2>/dev/null || echo '?')" "$(date +%T)" > "$LOCK/pid"
+    touch "$BEAT"
+    # Stops on its own once the lock is gone, so it can never outlive the run.
+    ( while touch "$BEAT" 2>/dev/null; do sleep "$BEAT_EVERY"; done ) &
+    BEAT_PID=$!
+
     # Ctrl-C must actually stop the loop. A bare INT handler would clean up and
     # then let the script carry on into postflight, quietly committing work the
     # user just asked to abandon — so interrupts exit, leaving partial writes in
     # the working tree for a human to inspect.
-    trap 'rm -rf "$LOCK"' EXIT
-    trap 'rm -rf "$LOCK"; echo "km-wiki: interrupted — partial work left uncommitted" >&2; exit 130' INT
-    trap 'rm -rf "$LOCK"; exit 143' TERM
+    trap 'release' EXIT
+    trap 'release; echo "km-wiki: interrupted — partial work left uncommitted" >&2; exit 130' INT
+    trap 'release; exit 143' TERM
     return 0
 }
 if ! take_lock; then
@@ -116,12 +185,35 @@ run_agent() {
     [[ -n "${KM_MODEL:-}" ]] && agent_cmd+=(--model "$KM_MODEL")
 
     log "running: ${agent_cmd[*]}"
+    local prompt status=0
+    prompt="$(cat "$rendered")"
+    [[ -n "$TIMEOUT_CMD" ]] || log "note: no timeout command found (brew install coreutils for gtimeout) — running unbounded"
+
+    # Backgrounded and waited on, rather than run in the foreground: bash defers
+    # a trap until the current command returns, and the agent can run for an
+    # hour. `wait` is interruptible, so Ctrl-C is acted on when it is pressed.
+    #
+    # `set -m` for this launch only, which puts the agent in its own process
+    # group. That looks backwards — it stops a terminal's Ctrl-C from reaching
+    # the agent at all — but it is the point: a group-wide SIGINT kills the
+    # wrapping subshell first and orphans the native agent underneath it, and a
+    # cancelled run then leaves a model still writing to the vault. Shielded,
+    # the agent stays intact until the trap below takes the whole tree down on
+    # purpose.
+    set -m
     if [[ -n "$TIMEOUT_CMD" ]]; then
-        "$TIMEOUT_CMD" "$timeout_s" "${agent_cmd[@]}" "$(cat "$rendered")" 2>&1 | tee -a "$LOG"
+        ( "$TIMEOUT_CMD" "$timeout_s" "${agent_cmd[@]}" "$prompt" 2>&1 | tee -a "$LOG" ) &
     else
-        log "note: no timeout command found (brew install coreutils for gtimeout) — running unbounded"
-        "${agent_cmd[@]}" "$(cat "$rendered")" 2>&1 | tee -a "$LOG"
+        ( "${agent_cmd[@]}" "$prompt" 2>&1 | tee -a "$LOG" ) &
     fi
+    CHILD_PID=$!
+
+    set +m
+
+    wait "$CHILD_PID" || status=$?
+    CHILD_PID=""
+
+    return "$status"
 }
 
 log "km-wiki loop starting in $REPO"
