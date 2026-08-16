@@ -1,5 +1,8 @@
 # km-wiki-learner — common entry points
-.PHONY: daily learn prompt extract scan lint stats seed test install-cron install-systemd
+.PHONY: doctor daily learn prompt extract scan lint stats seed test install-cron install-systemd
+
+doctor:           ## check this machine can run the loop, and what's missing
+	./scripts/doctor.sh
 
 daily:            ## run the full daily loop now
 	./loop/daily.sh

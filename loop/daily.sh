@@ -24,13 +24,42 @@ DATE="$(date +%F)"
 mkdir -p loop/logs loop/state loop/local
 LOG="loop/logs/$DATE.log"
 
-exec 9>"loop/state/.lock"
-if ! flock -n 9; then
+# Single-instance lock. mkdir is atomic everywhere, unlike flock which macOS
+# does not ship — and a lock whose absence silently blocks every run is worse
+# than no lock at all. A lock left behind by a killed run is reclaimed once its
+# owner is gone.
+LOCK="loop/state/lock"
+take_lock() {
+    if ! mkdir "$LOCK" 2>/dev/null; then
+        local owner
+        owner="$(cat "$LOCK/pid" 2>/dev/null || true)"
+        if [[ -n "$owner" ]] && kill -0 "$owner" 2>/dev/null; then
+            return 1
+        fi
+        echo "km-wiki: reclaiming stale lock from pid ${owner:-unknown}" >&2
+        rm -rf "$LOCK"
+        mkdir "$LOCK" 2>/dev/null || return 1
+    fi
+    echo $$ > "$LOCK/pid"
+    trap 'rm -rf "$LOCK"' EXIT INT TERM
+    return 0
+}
+if ! take_lock; then
     echo "km-wiki: another loop is already running, exiting" >&2
     exit 0
 fi
 
 log() { printf '[%s] %s\n' "$(date +%T)" "$*" | tee -a "$LOG"; }
+
+# `timeout` is GNU coreutils; macOS has it only as gtimeout, if at all. Running
+# without a watchdog beats refusing to run.
+TIMEOUT_CMD=""
+for candidate in timeout gtimeout; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        TIMEOUT_CMD="$candidate"
+        break
+    fi
+done
 
 export KM_MAX_ITEMS="${KM_MAX_ITEMS:-3}"
 
@@ -47,7 +76,12 @@ run_agent() {
     [[ -n "${KM_MODEL:-}" ]] && agent_cmd+=(--model "$KM_MODEL")
 
     log "running: ${agent_cmd[*]}"
-    timeout "$timeout_s" "${agent_cmd[@]}" "$(cat "$rendered")" 2>&1 | tee -a "$LOG"
+    if [[ -n "$TIMEOUT_CMD" ]]; then
+        "$TIMEOUT_CMD" "$timeout_s" "${agent_cmd[@]}" "$(cat "$rendered")" 2>&1 | tee -a "$LOG"
+    else
+        log "note: no timeout command found (brew install coreutils for gtimeout) — running unbounded"
+        "${agent_cmd[@]}" "$(cat "$rendered")" 2>&1 | tee -a "$LOG"
+    fi
 }
 
 log "km-wiki loop starting in $REPO"

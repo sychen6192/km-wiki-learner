@@ -13,6 +13,7 @@ curl -fsSL https://opencode.ai/install | bash    # 還沒裝的話
 export PATH="$HOME/.opencode/bin:$PATH"
 export ANTHROPIC_API_KEY=sk-ant-...              # 或 opencode auth login
 
+make doctor                  # 檢查這台機器缺什麼
 make test                    # 工具鏈自檢，不花錢
 KM_SKIP_AGENT=1 make daily   # 空跑，只驗流程不叫 LLM
 ```

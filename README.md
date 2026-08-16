@@ -52,6 +52,7 @@ make daily                                  # = ./loop/daily.sh
 # 3. 用 Obsidian 打開 vault/ 資料夾，看它長了什麼
 ```
 
+跑不起來先 `make doctor`，它會逐項列出這台機器缺什麼。
 單獨試工具鏈（不叫 LLM）：`make scan`、`make lint`、`make test`，或 `KM_SKIP_AGENT=1 make daily`。
 隨選深潛一個主題：`make learn TOPIC="KV cache 為什麼省算力"`。
 
@@ -100,6 +101,7 @@ tools/extract.py          Raw 的 PDF／掃描件／docx → 文字（自動 OCR
 tools/render.py           把 prompt 模板展開成純文字
 tests/                    工具鏈測試（python3 -m unittest）
 loop/daily.sh             迴圈外骨骼：extract → scan → agent → lint → commit → push
+scripts/doctor.sh         環境自檢
 scripts/ systemd/         cron 與 systemd timer 安裝器
 .github/workflows/daily.yml
 docs/USAGE.md             使用手冊（從第一天到日常掌舵）
