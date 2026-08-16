@@ -1,5 +1,5 @@
 # km-wiki-learner — common entry points
-.PHONY: daily learn scan lint stats seed test install-cron install-systemd
+.PHONY: daily learn prompt extract scan lint stats seed test install-cron install-systemd
 
 daily:            ## run the full daily loop now
 	./loop/daily.sh
@@ -7,6 +7,12 @@ daily:            ## run the full daily loop now
 learn:            ## on-demand deep dive: make learn TOPIC="KV cache"
 	@test -n "$(TOPIC)" || (echo 'usage: make learn TOPIC="..."' && exit 1)
 	KM_TOPIC="$(TOPIC)" ./loop/daily.sh
+
+prompt:           ## show the exact prompt the loop sends: make prompt [P=learn] [ARGS="..."]
+	python3 tools/render.py prompts/$(or $(P),daily).md $(ARGS)
+
+extract:          ## turn PDFs/images/docx in vault/Raw into readable text
+	python3 tools/extract.py
 
 scan:             ## print the vault work report (JSON)
 	python3 tools/vault.py scan

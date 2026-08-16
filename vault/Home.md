@@ -30,8 +30,8 @@
 
 ```
 你（Inbox / Obsidian）─┐
-                        ├─▶ 每日迴圈：scan → plan → research → write → link → review → report
-知識前緣（dangling links）┘        （opencode run --command daily，由 cron / GitHub Actions 觸發）
+                        ├─▶ 每日迴圈：extract → scan → plan → research → write → link → review
+知識前緣（dangling links）┘        （loop/daily.sh，由 cron / systemd / GitHub Actions 觸發）
 ```
 
 結構由 `tools/vault.py` 以確定性程式維護（連結健檢、儀表板、種子筆記）；內容由 LLM 撰寫、由 lint 把關。詳細規範見 [[Style Guide]]。

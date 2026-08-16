@@ -187,6 +187,73 @@ class TestSeed(VaultFixture):
         self.assertEqual(json.loads(payload)["totals"]["dangling_links"], 1)
 
 
+class TestRender(unittest.TestCase):
+    """The rendered prompt is what the agent actually gets — it must be complete."""
+
+    def setUp(self):
+        import render
+        self.render = render
+
+    def test_expansions(self):
+        fm, body = self.render.split_frontmatter("---\na: b\n---\nhello\n")
+        self.assertEqual(fm.strip(), "a: b")
+        self.assertEqual(body, "hello\n")
+        self.assertEqual(self.render.expand_shell("d=!`echo 2026-08-15`"), "d=2026-08-15")
+        self.assertIn("not found", self.render.expand_files("@no/such/file.md\n"))
+
+    def test_arguments_substitute(self):
+        tmp = Path(tempfile.mkdtemp()) / "t.md"
+        tmp.write_text("學習 $ARGUMENTS，第一個是 $1\n", encoding="utf-8")
+        out = self.render.render(tmp, ["KV cache", "extra"])
+        self.assertIn("學習 KV cache extra", out)
+        self.assertIn("第一個是 KV cache", out)
+
+    def test_real_daily_prompt_is_fully_expanded(self):
+        out = self.render.render(Path(__file__).resolve().parent.parent / "prompts/daily.md", [])
+        self.assertIn('"frontier"', out)   # scan actually ran
+        self.assertIn("Inbox", out)        # @vault/Inbox.md actually inlined
+        self.assertNotIn("!`", out)        # nothing left unexpanded
+        self.assertNotIn("\n@vault", out)
+
+
+class TestExtract(unittest.TestCase):
+    """Dropping a file in Raw/ must not require the human to convert it."""
+
+    def setUp(self):
+        import extract
+        self.extract = extract
+
+    def test_docx_is_read_with_the_standard_library(self):
+        import zipfile
+        path = Path(tempfile.mkdtemp()) / "lesson.docx"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("word/document.xml",
+                        "<w:document><w:body><w:p><w:t>第一課</w:t></w:p>"
+                        "<w:p><w:t>なければならない</w:t></w:p></w:body></w:document>")
+        text, method = self.extract.from_docx(path)
+        self.assertEqual(method, "docx")
+        self.assertIn("第一課", text)
+        self.assertIn("なければならない", text)
+
+    def test_unsupported_format_reports_instead_of_crashing(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            self.extract.extract(Path("/tmp/whatever.xyz"))
+        self.assertIn("xyz", str(ctx.exception))
+
+    def test_report_covers_every_status(self):
+        text = self.extract.report({
+            "Raw/a.md": {"status": "text", "text": "Raw/a.md", "method": "plain", "chars": 10},
+            "Raw/b.pdf": {"status": "ok", "text": "loop/state/extracted/b.pdf.txt",
+                          "method": "pdftotext", "chars": 500},
+            "Raw/c.jpg": {"status": "failed", "text": None, "method": None,
+                          "chars": 0, "note": "需要 tesseract"},
+        })
+        self.assertIn("直接讀原檔", text)
+        self.assertIn("loop/state/extracted/b.pdf.txt", text)
+        self.assertIn("需要 tesseract", text)
+        self.assertIn("沒有素材", self.extract.report({}))
+
+
 class TestCursor(unittest.TestCase):
     """Cursors are how the loop remembers where each external source got to."""
 

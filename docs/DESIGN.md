@@ -11,7 +11,7 @@ Karpathy 的 llm-wiki 模式（raw → wiki → schema，操作 ingest / query /
 | 角色 | 承擔 | 實體 |
 |---|---|---|
 | 人類主編 | 意圖與品味 | `Inbox.md`、`Raw/`、`loop/local/`、git diff 驗收 |
-| LLM 圖書館員 | 認知勞動 | `.opencode/agents/librarian.md`（+ scholar 子代理） |
+| LLM 圖書館員 | 認知勞動 | `AGENTS.md` 的信條 + `prompts/` 的任務模板 |
 | 確定性工具 | 結構與紀律 | `tools/vault.py`、`loop/daily.sh`、git |
 
 原則：**LLM 永遠不做程式能做的事**。掃描、驗收、儀表板、排程、commit 都是普通程式碼 —
@@ -20,10 +20,10 @@ Karpathy 的 llm-wiki 模式（raw → wiki → schema，操作 ingest / query /
 ## 每日迴圈
 
 ```
-preflight   git pull → vault.py scan → loop/state/scan.json
-agent       opencode run --command daily --auto
-              (scan JSON、Inbox、loop/local/*.md 由 command template 的
-               !`shell` 插值與 @file 引用直接注入 prompt)
+preflight   git pull → extract.py（Raw/ 的 PDF／掃描件／docx → loop/state/extracted/）
+              → vault.py scan → loop/state/scan.json
+agent       tools/render.py 把 prompts/daily.md 展開成純文字（!`shell` 插值、
+              @file 引用），再交給 KM_AGENT_CMD 指定的 CLI（預設 opencode run）
 postflight  vault.py stats → vault.py lint
               └─ lint 失敗 → 一次 garden 修復 pass → 再 lint（仍失敗就照樣 commit，
                  讓人類在 diff 裡看到問題 — 絕不弄丟工作）
@@ -68,8 +68,13 @@ commit      git add vault && commit "wiki(daily): DATE — <每日報告第一�
 - **`Raw/` 檔案是合法連結目標**（`[[paper.pdf]]`、`[[剪藏標題]]`），但不是筆記；agent 只讀不寫。
 - **frontmatter 用 stdlib 自寫的 YAML 子集解析**（scalar／inline list／block list）— 換取零依賴；
   Style Guide 明定只用這個子集。
-- **git 只屬於外骨骼** — `opencode.json` 對 agent deny 掉 `git commit/push/reset/checkout` 與 `rm`；
-  headless 跑 `--auto`（自動核可未明示 deny 的權限）時，deny 清單就是真正的安全邊界。
+- **git 只屬於外骨骼** — commit/push 只在 `daily.sh` 裡發生，prompt 三處明令 agent 不得執行；
+  硬性權限（deny git 寫入）放使用者的全域 agent 設定，repo 不帶任何供應商設定檔。
+- **不綁 agent 供應商** — 專案層級的 opencode 設定會讓它在 repo 裡 bootstrap 相依沙箱
+  （`node_modules/`），而且 schema 隨版本變動、舊版直接開不起來。改成「純文字 prompt +
+  可替換執行器」後，這兩個問題一起消失，也換得 `claude -p` 之類的可攜性。
+- **素材轉檔屬於工具層** — 要求人類先把 PDF 轉成文字是把工具的限制轉嫁給使用者；
+  extract 在 preflight 自動處理，掃描件自動 OCR，缺工具時明確報告而非默默略過。
 - **模型不寫死** — `KM_MODEL` / opencode 設定決定；repo 不綁供應商。
 - **語言是一行設定** — 預設繁中在 `AGENTS.md`，不散落各處。
 

@@ -8,8 +8,8 @@
 ```
 你（Obsidian / 手機）                每日迴圈（cron / systemd / GitHub Actions）
 ┌──────────────────┐               ┌─────────────────────────────────────────────┐
-│ Inbox.md  出題    │──────────────▶│ scan ──▶ opencode run --command daily ──▶   │
-│ Raw/      丟素材  │               │  (JSON)   plan→research→write→link→review    │
+│ Inbox.md  出題    │──────────────▶│ extract ──▶ scan ──▶ 渲染 prompt ──▶ agent  │
+│ Raw/      丟素材  │               │  (OCR)     (JSON)    plan→write→link→review  │
 │ git diff  驗收    │◀──────────────│ lint ──▶ stats ──▶ git commit & push        │
 └──────────────────┘               └─────────────────────────────────────────────┘
 ```
@@ -33,10 +33,10 @@ Karpathy 的 idea file（2026-04）走紅後出現一批實作，我們逐一研
 
 1. **知識前緣（frontier）驅動生長** — dangling `[[wikilink]]` 不是錯誤，是維基的好奇心佇列。`scan` 依被引用次數排序，迴圈每天優先長出最被需要的頁面：維基沿著自己的無知邊界擴張。
 2. **確定性外骨骼、LLM 內臟** — 掃描、lint、儀表板、git 全是 stdlib Python + bash（零依賴）；LLM 的輸出必須通過 `vault.py lint`（0 error）才會被 commit。壞筆記進不了 main。
-3. **手機就是控制台** — `Inbox.md` 勾選框出題、[Obsidian Web Clipper](https://obsidian.md/clipper) 剪素材進 `Raw/`，隔天清晨全部變成互相連結的筆記。整個操作介面就是 Obsidian 本身。
+3. **丟進去就好** — PDF、掃描件、手機拍的照片、`.docx` 直接放 `Raw/`，迴圈自動抽文字並在需要時 OCR。出題就在 `Inbox.md` 打勾選框。整個操作介面就是 Obsidian 本身，手機也能用。
 4. **知識會留在你腦裡** — 每篇筆記自動配 flashcard（相容 [obsidian-spaced-repetition](https://github.com/st3v3nmw/obsidian-spaced-repetition)），且筆記本身有 `review_after` 排程：到期的筆記迴圈會回頭查證、更新、晉升（`seed → budding → evergreen`）。
 5. **完全留痕、完全可攜** — 每天一個 commit + 一篇 `Daily/` 報告（做了什麼、為什麼、明日候選）。全部是 markdown 檔案，Karpathy 說的 "file over app"：沒有資料庫、沒有服務、換掉任何一個工具都活得下去。
-6. **Agent 無關的合約** — 操作手冊在 `AGENTS.md`（opencode 原生讀取，Claude Code 等也認得），工作合約是 markdown + JSON。今天用 opencode，明天換別的 CLI agent，vault 照長。
+6. **不綁任何一家 agent** — repo 裡沒有 opencode 專屬設定；prompt 是 `prompts/` 底下的純文字模板，執行器由 `KM_AGENT_CMD` 決定（`opencode run`、`claude -p`、`codex exec` 都行）。合約寫在 `AGENTS.md`，各家 CLI 都認得。
 
 ## 快速開始
 
@@ -83,24 +83,23 @@ make daily                                  # = ./loop/daily.sh
 - **模型**：`KM_MODEL=anthropic/claude-sonnet-4-5` 之類（`provider/model` 格式，`opencode models` 可列出）。
 - **本機私有指令**：`loop/local/*.md`（gitignored）會注入每天的 prompt，優先級同 Inbox — 適合放只屬於這台機器的來源與偏好，範例見 [`loop/local.example.md`](loop/local.example.md)。
 - **接上外部來源（MCP）**：讓迴圈每天自己去某個系統抓新素材，含「從哪裡抓起」的游標機制 — 見 [docs/SOURCES.md](docs/SOURCES.md)。
-- **權限**：[`opencode.json`](opencode.json) 限制 agent 只能編輯 `vault/`，git commit/push/rm 一律 deny — commit 永遠由外層腳本執行，agent 寫不進歷史。
+- **換掉 opencode**：`KM_AGENT_CMD="claude -p" make daily` — prompt 是純文字，agent 只是執行器。
+- **權限**：repo 內沒有任何 agent 設定檔，權限限制放你的全域設定（見 [WALKTHROUGH](docs/WALKTHROUGH.md) 的「安全邊界」）。git 寫入一律由外層腳本執行，agent 改不動歷史。
 - **寫作規範**：`vault/_meta/Style Guide.md` 是憲法，`tools/vault.py lint` 是執法者。
 
 ## 專案結構
 
 ```
-AGENTS.md                 agent 操作手冊（opencode 自動載入）
-opencode.json             opencode 設定：權限、預設 agent
-.opencode/
-  agents/librarian.md     主 agent：圖書館員
-  agents/scholar.md       子 agent：唯讀研究員
-  commands/daily.md       每日迴圈（scan JSON 與 Inbox 直接注入 prompt）
-  commands/learn|garden|quiz.md
+AGENTS.md                 agent 操作手冊與行為契約
+prompts/daily.md          每日迴圈的 prompt 模板（scan、Inbox、素材清單直接注入）
+prompts/learn|garden.md   隨選深潛、結構修復
 vault/                    ← 用 Obsidian 打開這個資料夾
   Home.md  Inbox.md  Raw/  Notes/  Maps/  Sources/  Daily/  Review/  _meta/
 tools/vault.py            scan / lint / stats / seed（stdlib，零依賴）
+tools/extract.py          Raw 的 PDF／掃描件／docx → 文字（自動 OCR）
+tools/render.py           把 prompt 模板展開成純文字
 tests/                    工具鏈測試（python3 -m unittest）
-loop/daily.sh             迴圈外骨骼：scan → agent → lint → commit → push
+loop/daily.sh             迴圈外骨骼：extract → scan → agent → lint → commit → push
 scripts/ systemd/         cron 與 systemd timer 安裝器
 .github/workflows/daily.yml
 docs/USAGE.md             使用手冊（從第一天到日常掌舵）
@@ -113,6 +112,6 @@ docs/RESEARCH.md          先行者研究快照
 
 - Andrej Karpathy — [LLM Knowledge Bases](https://x.com/karpathy/status/2039805659525644595)、[llm-wiki idea file](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)、[讀書配 LLM 的習慣](https://x.com/karpathy/status/1990577951671509438)。本專案是那份 idea file 的「+每日迴圈」分支。
 - Andy Matuschak 的 [Evergreen notes](https://notes.andymatuschak.org/Evergreen_notes)、Nick Milo 的 MOC、Maggie Appleton 的 [digital garden 成熟度](https://maggieappleton.com/garden-history)（🌱→🌿→🌳）。
-- [opencode](https://opencode.ai) — headless agent 執行層（`opencode run --command daily --auto`）。
+- [opencode](https://opencode.ai) — 預設的 headless agent 執行層（可用 `KM_AGENT_CMD` 換掉）。
 
 License: MIT

@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # km-wiki daily loop — the deterministic exoskeleton around the LLM librarian.
 #
-#   preflight:  git pull → vault scan
-#   agent:      opencode run --command daily   (or `learn` when KM_TOPIC is set)
+#   preflight:  git pull → extract Raw/ to text → vault scan
+#   agent:      render prompts/daily.md → hand the text to the agent CLI
 #   postflight: stats → lint (one repair pass on failure) → git commit → push
 #
+# The prompt is plain text and the agent is whatever `KM_AGENT_CMD` names, so
+# nothing here is tied to one vendor's config format.
+#
 # Environment knobs:
-#   KM_MODEL      opencode model override, e.g. anthropic/claude-sonnet-4-5
+#   KM_AGENT_CMD  agent CLI to pipe the prompt into (default: opencode run)
+#   KM_MODEL      model override, e.g. anthropic/claude-sonnet-4-5
 #   KM_MAX_ITEMS  work-item budget per run (default 3)
-#   KM_TOPIC      run an on-demand deep dive on this topic instead of the daily loop
+#   KM_TOPIC      deep-dive this topic instead of running the daily loop
 #   KM_TIMEOUT    seconds before the agent run is killed (default 3600)
-#   KM_SKIP_AGENT set to 1 to run scan/lint/stats/commit only (dry run)
+#   KM_SKIP_AGENT set to 1 for a dry run (scan/lint/stats/commit only)
 #   KM_NO_PULL / KM_NO_PUSH  skip the corresponding git step
 set -euo pipefail
 
@@ -29,8 +33,22 @@ fi
 log() { printf '[%s] %s\n' "$(date +%T)" "$*" | tee -a "$LOG"; }
 
 export KM_MAX_ITEMS="${KM_MAX_ITEMS:-3}"
-MODEL_ARGS=()
-[[ -n "${KM_MODEL:-}" ]] && MODEL_ARGS=(--model "$KM_MODEL")
+
+# Run the agent on a rendered prompt file. Everything vendor-specific lives here.
+run_agent() {
+    local template="$1" timeout_s="$2"
+    shift 2
+    local rendered="loop/state/prompt-$DATE.md"
+    python3 tools/render.py --raw "$template" "$@" > "$rendered"
+    log "prompt rendered to $rendered ($(wc -c < "$rendered") bytes)"
+
+    local -a agent_cmd
+    read -r -a agent_cmd <<< "${KM_AGENT_CMD:-opencode run}"
+    [[ -n "${KM_MODEL:-}" ]] && agent_cmd+=(--model "$KM_MODEL")
+
+    log "running: ${agent_cmd[*]}"
+    timeout "$timeout_s" "${agent_cmd[@]}" "$(cat "$rendered")" 2>&1 | tee -a "$LOG"
+}
 
 log "km-wiki loop starting in $REPO"
 
@@ -38,26 +56,19 @@ log "km-wiki loop starting in $REPO"
 if [[ -z "${KM_NO_PULL:-}" ]] && git remote get-url origin >/dev/null 2>&1; then
     git pull --rebase --autostash 2>&1 | tee -a "$LOG" || log "WARN: pull failed, continuing with local state"
 fi
+python3 tools/extract.py 2>&1 | tee -a "$LOG" || log "WARN: extraction had problems; the report lists them"
 python3 tools/vault.py scan --out loop/state/scan.json | tee -a "$LOG"
 
 # --- agent -------------------------------------------------------------------
 if [[ -z "${KM_SKIP_AGENT:-}" ]]; then
-    if ! command -v opencode >/dev/null 2>&1; then
-        log "ERROR: opencode not found. Install: curl -fsSL https://opencode.ai/install | bash"
-        exit 1
-    fi
-    CMD="daily"
-    CMD_ARGS=()
     if [[ -n "${KM_TOPIC:-}" ]]; then
-        CMD="learn"
-        CMD_ARGS=("$KM_TOPIC")
         log "on-demand mode: learn '$KM_TOPIC'"
+        run_agent prompts/learn.md "${KM_TIMEOUT:-3600}" "$KM_TOPIC" \
+            || log "WARN: agent run exited non-zero; postflight will validate what it left behind"
+    else
+        run_agent prompts/daily.md "${KM_TIMEOUT:-3600}" \
+            || log "WARN: agent run exited non-zero; postflight will validate what it left behind"
     fi
-    log "running: opencode run --command $CMD --auto ${MODEL_ARGS[*]:-}"
-    timeout "${KM_TIMEOUT:-3600}" \
-        opencode run --command "$CMD" --auto --title "km-wiki $CMD $DATE" \
-        "${MODEL_ARGS[@]}" "${CMD_ARGS[@]}" 2>&1 | tee -a "$LOG" \
-        || log "WARN: agent run exited non-zero; postflight will validate what it left behind"
 else
     log "KM_SKIP_AGENT set — skipping agent run"
 fi
@@ -67,8 +78,7 @@ python3 tools/vault.py stats | tee -a "$LOG" || true
 if ! python3 tools/vault.py lint 2>&1 | tee -a "$LOG"; then
     log "lint failed — attempting one repair pass"
     if [[ -z "${KM_SKIP_AGENT:-}" ]]; then
-        timeout 900 opencode run --command garden --auto "${MODEL_ARGS[@]}" 2>&1 | tee -a "$LOG" \
-            || log "WARN: repair pass exited non-zero"
+        run_agent prompts/garden.md 900 || log "WARN: repair pass exited non-zero"
     fi
     python3 tools/vault.py stats >/dev/null 2>&1 || true
     python3 tools/vault.py lint 2>&1 | tee -a "$LOG" \
@@ -86,15 +96,11 @@ git commit -m "wiki(daily): $DATE${SUMMARY:+ — $SUMMARY}" 2>&1 | tee -a "$LOG"
 
 if [[ -z "${KM_NO_PUSH:-}" ]] && git remote get-url origin >/dev/null 2>&1; then
     BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-    pushed=""
-    for delay in 2 4 8 16; do
-        if git push -u origin "$BRANCH" 2>&1 | tee -a "$LOG"; then
-            pushed=1
-            break
-        fi
+    for delay in 2 4 8 16 0; do
+        git push -u origin "$BRANCH" 2>&1 | tee -a "$LOG" && break
+        (( delay == 0 )) && { log "WARN: push failed after retries — commit is safe locally"; break; }
         log "push failed, retrying in ${delay}s"
         sleep "$delay"
     done
-    [[ -n "$pushed" ]] || git push -u origin "$BRANCH" 2>&1 | tee -a "$LOG" || log "WARN: push failed after retries — commit is safe locally"
 fi
 log "km-wiki loop finished"

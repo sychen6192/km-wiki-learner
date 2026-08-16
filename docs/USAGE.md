@@ -69,14 +69,14 @@ iCloud/Syncthing 同步），通勤時丟題目、剪網頁、刷卡；生長在
 平常只會用到 `daily`（自動）和 `learn`（想立刻學）。
 
 ```bash
-make daily                          # 每日迴圈（cron 跑的就是這個）
-make learn TOPIC="Raft 共識演算法"    # 現在就深潛一個主題
-opencode run --command garden --auto # 只修結構，不產新內容
-opencode run --command quiz --auto   # 補最近筆記缺的複習卡
+make daily                        # 每日迴圈（cron 跑的就是這個）
+make learn TOPIC="Raft 共識演算法"  # 現在就深潛一個主題
+make prompt                       # 印出這次要送出去的 prompt，不花 token
+make extract                      # 只把 Raw 的素材轉成文字
 ```
 
-`garden` 適合在你手動大改 vault 之後跑；`quiz` 適合久沒刷卡想補齊時跑。
-（`daily` 內建：lint 失敗會自動叫一次 `garden` 修。）
+三個 prompt 模板都在 `prompts/`：`daily`（每日）、`learn`（隨選）、`garden`（只修結構）。
+`daily` 內建：lint 失敗會自動叫一次 `garden` 修。
 
 ## 怎麼下好 Inbox 指令
 
@@ -116,6 +116,7 @@ make scan | head -40                    # 現在的待辦與知識前緣
 |---|---|
 | 每天做多少（成本） | `KM_MAX_ITEMS=5 make daily`，或 GitHub repo variable |
 | 用哪個模型 | `KM_MODEL=anthropic/claude-sonnet-4-5`（`opencode models` 可列出） |
+| 換掉 opencode | `KM_AGENT_CMD="claude -p"`，prompt 是純文字，任何 CLI agent 都能接 |
 | 筆記語言 | 改 `AGENTS.md` 裡語言那一行 |
 | 複習間隔 | 改 `AGENTS.md` 的 7 → 21 → 60 天 |
 | 接外部來源（MCP） | 見 [SOURCES.md](SOURCES.md) |
@@ -127,8 +128,8 @@ make scan | head -40                    # 現在的待辦與知識前緣
 |---|---|
 | `opencode not found` | 沒裝或 PATH 沒帶到 `$HOME/.opencode/bin`（cron 的 PATH 很乾淨，安裝腳本已代入） |
 | 迴圈跑了但沒 commit | 沒有 vault 變更就不會 commit（正常）；看 `loop/logs/<日期>.log` |
-| 卡住不動、log 有 `auto-rejecting` | 某個權限沒開；`opencode.json` 或全域設定加 `allow` |
-| lint 一直有 error | `opencode run --command garden --auto` 手動修一輪，仍失敗就看 `make lint` 指的那幾行 |
+| 卡住不動、log 有 `auto-rejecting` | 某個權限沒開，在全域 `~/.config/opencode/opencode.json` 加 `allow` |
+| lint 一直有 error | 看 `make lint` 指的那幾行；`daily` 已內建一次自動修復 |
 | 想重跑今天 | 直接再跑一次 `make daily`；迴圈冪等，工作由現況決定 |
 | 兩個迴圈同時跑 | 不會 —— flock 會讓第二個直接退出 |
 | 複習進度不見了 | 檢查是否有人改動 `<!--SR:...-->` 註解（Style Guide 明令禁止） |

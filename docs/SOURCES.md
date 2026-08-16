@@ -12,7 +12,7 @@ issue tracker、RSS、書籤、任何 MCP server —— 可以讓迴圈每天自
 | `loop/local/*.md`（本機） | 抓取指令：範圍、產出契約、頻率 | ❌ `.gitignore` 已排除 |
 | `loop/state/cursors.json`（本機） | 抓到哪裡了（游標） | ❌ `.gitignore` 已排除 |
 
-專案的 `opencode.json` 完全不需要知道你接了什麼來源。
+repo 裡沒有任何 agent 設定檔，所以你接了什麼來源，版本控制完全不會知道。
 
 ## 1. 掛載 MCP server（全域設定）
 

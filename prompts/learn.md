@@ -1,23 +1,22 @@
----
-description: 立刻深入研究一個主題並寫成筆記（用法：opencode run --command learn "主題或問題"）
-agent: librarian
----
+今天是 !`date +%F`。主編指定現在深入學習：**$ARGUMENTS**
 
-主編指定現在深入學習：**$ARGUMENTS**
+先讀 `AGENTS.md` 與 `vault/_meta/Style Guide.md`。
 
-今天是 !`date +%F`。
-
-1. 先掃一眼現況，避免重複造頁：
+## Vault 現況（避免重複造頁）
 
 ```json
 !`python3 tools/vault.py scan`
 ```
 
-2. 把主題交給 @scholar 深入研究（定義、重點、相關概念、來源、信心缺口）。
-3. 依 Style Guide 產出：
-   - 一篇核心概念筆記（`Notes/`，budding 以上品質；若已存在同名筆記則深化它）。
-   - 研究中出現的重要一手來源，各寫一篇 `Sources/` 摘要並互相連結。
-   - 收進最合適的 Map（必要時開新 Map）；值得成頁的相關概念留成 dangling link 給日後的迴圈。
-   - `vault/Review/Flashcards.md` 加 1–3 張複習卡；筆記設 `review_after`（+7 天）。
-4. 在今天的 `vault/Daily/!`date +%F`.md` 追加一節「隨選學習」記錄成果（檔案不存在就建立）。
-5. `python3 tools/vault.py lint` 修到 0 error。不要執行 git commit／push。
+## 要做的事
+
+1. 深入研究這個主題：定義、核心機制、常見誤解、與既有筆記的關係。優先一手來源，
+   重要論斷交叉驗證；查不到的明說「不確定」。
+2. 產出（依 Style Guide）：
+   - 一篇核心概念筆記（`vault/Notes/`，budding 以上品質；已存在同名筆記就深化它）。
+   - 研究中用到的重要來源，各寫一篇 `vault/Sources/` 摘要並互相連結。
+   - 收進最合適的 Map（沒有就開一張）；值得成頁的相關概念留成 dangling link，
+     交給之後的迴圈長出來。
+   - 對應的 `vault/Review/` 複習檔補 1–3 張卡；筆記設 `review_after`（+7 天）。
+3. 在 `vault/Daily/!`date +%F`.md` 追加一節「隨選學習」記錄成果（檔案不存在就建立）。
+4. 跑 `python3 tools/vault.py lint` 修到 0 error。**不要 git commit 或 push。**
