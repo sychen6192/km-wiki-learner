@@ -58,6 +58,7 @@ make daily                                  # = ./loop/daily.sh
 
 📖 **從零走一遍：[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)** — 以「準備日文 N4，把老師的講義和作業餵進去」為例的完整實作流程。
 📘 **日常操作與疑難排解：[docs/USAGE.md](docs/USAGE.md)**
+🔧 **要動這個 repo：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — 執行流、四個契約、環境變數，以及 Windows 上那些「名字解析到的東西跟你以為的不一樣」的陷阱。
 
 ### 讓它每天自己跑
 
@@ -119,6 +120,7 @@ scripts/doctor.sh         環境自檢
 scripts/ systemd/         cron 與 systemd timer 安裝器
 .github/workflows/daily.yml
 docs/USAGE.md             使用手冊（從第一天到日常掌舵）
+docs/ARCHITECTURE.md      這套怎麼跑的：執行流、契約、環境變數、Windows 陷阱
 docs/SOURCES.md           接上外部素材來源（MCP）與游標機制
 docs/DESIGN.md            設計決策紀錄
 docs/RESEARCH.md          先行者研究快照
