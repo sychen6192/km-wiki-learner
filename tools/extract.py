@@ -117,6 +117,22 @@ def vision_model() -> str:
     return os.environ.get("KM_VISION_MODEL", "").strip()
 
 
+def extraction_recipe() -> str:
+    """Everything that changes the output if it changes.
+
+    Cached text is only a hit if it was produced the same way. Keying the cache
+    on the source file's mtime alone means raising KM_VISION_MAX_PAGES, moving
+    to a better model or bumping the DPI all return the previous answer and
+    report success — the most confusing possible outcome, because the command
+    the human just ran did nothing and said it worked.
+    """
+    dpi = os.environ.get("KM_RASTER_DPI", str(RASTER_DPI))
+    if vision_model():
+        return "|".join(["vision", vision_model(), dpi,
+                         os.environ.get("KM_VISION_MAX_PAGES", "0")])
+    return "|".join(["ocr", ocr_languages(), dpi])
+
+
 def ask_vision(image: Path) -> str:
     """Transcribe one page image with the configured vision model."""
     base = os.environ.get("KM_API_BASE", "http://localhost:11434").rstrip("/")
@@ -286,6 +302,8 @@ def main(argv) -> int:
         return 0
 
     OUT.mkdir(parents=True, exist_ok=True)
+    previous = json.loads(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else {}
+    recipe = extraction_recipe()
     entries: dict = {}
     for path in raw_files():
         rel = path.relative_to(REPO / "vault").as_posix()
@@ -299,11 +317,13 @@ def main(argv) -> int:
             continue
 
         target = OUT / (path.relative_to(RAW).as_posix().replace("/", "__") + ".txt")
-        if target.exists() and target.stat().st_mtime >= path.stat().st_mtime:
+        if (target.exists() and target.stat().st_mtime >= path.stat().st_mtime
+                and previous.get(rel, {}).get("recipe") == recipe):
             entries[rel] = {
                 "status": "ok",
                 "text": target.relative_to(REPO).as_posix(),
                 "method": "cached",
+                "recipe": recipe,
                 "chars": len(target.read_text(encoding="utf-8", errors="replace")),
             }
             continue
@@ -325,6 +345,7 @@ def main(argv) -> int:
             "status": "ok",
             "text": target.relative_to(REPO).as_posix(),
             "method": method,
+            "recipe": recipe,
             "chars": len(text),
         }
 
