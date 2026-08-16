@@ -49,7 +49,13 @@ take_lock() {
         mkdir "$LOCK" 2>/dev/null || return 1
     fi
     echo $$ > "$LOCK/pid"
-    trap 'rm -rf "$LOCK"' EXIT INT TERM
+    # Ctrl-C must actually stop the loop. A bare INT handler would clean up and
+    # then let the script carry on into postflight, quietly committing work the
+    # user just asked to abandon — so interrupts exit, leaving partial writes in
+    # the working tree for a human to inspect.
+    trap 'rm -rf "$LOCK"' EXIT
+    trap 'rm -rf "$LOCK"; echo "km-wiki: interrupted — partial work left uncommitted" >&2; exit 130' INT
+    trap 'rm -rf "$LOCK"; exit 143' TERM
     return 0
 }
 if ! take_lock; then
