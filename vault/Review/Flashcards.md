@@ -18,3 +18,9 @@ dangling link（知識前緣）在本維基扮演什麼角色？::它是維基�
 [[Map of Content]] 對 LLM agent 的隱藏功能？::注意力路標 — agent 讀地圖就能掌握全庫結構，token 成本從 O(全庫) 降到 O(地圖)。
 
 [[Zettelkasten]] 給本維基的核心原則？::連結即思考 — 寫下兩個概念的連結會逼你想清楚關係，所以 lint 要求每篇筆記至少兩條出鏈。
+
+[[PKM Methods Comparison]] 工程師最適合哪種 PKM 方法？::不單選，建議混合式：File System 用 [[PARA method|PARA]] 管專案文件（執行層），Notes 內容用 [[Zettelkasten]] 管知識連結（創新層）。
+
+## LLM & Inference
+
+[[KV cache]] 為什麼能將 autoregressive 生成延遲從 $O(N^2)$ 降至接近 $O(1)$？::因為它儲存並重複使用歷史 token 的 Key/Value 張量，讓當前步驟只需計算新 token 並拼接，無需重新掃描完整上下文。
