@@ -182,4 +182,6 @@ KM_AGENT_CMD="claude -p" make daily
 KM_AGENT_CMD="codex exec" make daily
 ```
 
-只要那個 CLI 接受「一段文字當參數」就能用。
+只要那個 CLI 接受「一段文字當參數」就能用。預設是 `opencode run --auto` ——
+`--auto` 不能省，headless 執行時沒有人可以按同意，少了它每個寫檔都會被自動拒絕。
+換成別家 CLI 時記得帶上對應的免互動旗標。

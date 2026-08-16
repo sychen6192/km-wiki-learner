@@ -131,7 +131,7 @@ make scan | head -40                    # 現在的待辦與知識前緣
 | 任何「跑不起來」 | 先跑 `make doctor`，它會逐項列出缺什麼與怎麼裝 |
 | `opencode not found` | 沒裝或 PATH 沒帶到 `$HOME/.opencode/bin`（cron 的 PATH 很乾淨，安裝腳本已代入） |
 | 迴圈跑了但沒 commit | 沒有 vault 變更就不會 commit（正常）；看 `loop/logs/<日期>.log` |
-| 卡住不動、log 有 `auto-rejecting` | 某個權限沒開，在全域 `~/.config/opencode/opencode.json` 加 `allow` |
+| log 有 `permission requested … auto-rejecting` | agent 指令少了 `--auto`（headless 沒人可問，預設一律拒絕）；或該動作在全域設定被 `deny` |
 | lint 一直有 error | 看 `make lint` 指的那幾行；`daily` 已內建一次自動修復 |
 | 想重跑今天 | 直接再跑一次 `make daily`；迴圈冪等，工作由現況決定 |
 | 兩個迴圈同時跑 | 不會 —— 第二個會偵測到鎖並退出 |

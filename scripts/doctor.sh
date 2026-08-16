@@ -23,13 +23,21 @@ else
     bad "git 沒有安裝"
 fi
 
-AGENT_CMD="${KM_AGENT_CMD:-opencode run}"
+AGENT_CMD="${KM_AGENT_CMD:-opencode run --auto}"
 AGENT_BIN="${AGENT_CMD%% *}"
 if command -v "$AGENT_BIN" >/dev/null 2>&1; then
     ok "agent CLI — $AGENT_BIN（完整指令：$AGENT_CMD）"
 else
     bad "找不到 $AGENT_BIN。裝 opencode：curl -fsSL https://opencode.ai/install | bash"
     bad "  裝完記得：export PATH=\"\$HOME/.opencode/bin:\$PATH\""
+fi
+if [[ "$AGENT_BIN" == "opencode" && "$AGENT_CMD" != *"--auto"* ]]; then
+    bad "KM_AGENT_CMD 少了 --auto，headless 執行時所有寫檔都會被自動拒絕"
+fi
+if [[ -n "${KM_MODEL:-}" ]]; then
+    ok "KM_MODEL — $KM_MODEL"
+else
+    warn "沒設 KM_MODEL，會用 agent 的預設模型（可能不是你想要的那個）"
 fi
 
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then

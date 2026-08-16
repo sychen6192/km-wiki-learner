@@ -9,7 +9,8 @@
 # nothing here is tied to one vendor's config format.
 #
 # Environment knobs:
-#   KM_AGENT_CMD  agent CLI to pipe the prompt into (default: opencode run)
+#   KM_AGENT_CMD  agent CLI to hand the prompt to (default: opencode run --auto;
+#                 a headless agent must be allowed to approve its own writes)
 #   KM_MODEL      model override, e.g. anthropic/claude-sonnet-4-5
 #   KM_MAX_ITEMS  work-item budget per run (default 3)
 #   KM_TOPIC      deep-dive this topic instead of running the daily loop
@@ -78,8 +79,12 @@ run_agent() {
     python3 tools/render.py --raw "$template" "$@" > "$rendered"
     log "prompt rendered to $rendered ($(wc -c < "$rendered") bytes)"
 
+    # --auto is what makes opencode approve its own file writes when no human is
+    # watching; without it every edit is auto-rejected and the run does nothing.
+    # It only approves what is not explicitly denied, so the deny rules in the
+    # user's global config still hold.
     local -a agent_cmd
-    read -r -a agent_cmd <<< "${KM_AGENT_CMD:-opencode run}"
+    read -r -a agent_cmd <<< "${KM_AGENT_CMD:-opencode run --auto}"
     [[ -n "${KM_MODEL:-}" ]] && agent_cmd+=(--model "$KM_MODEL")
 
     log "running: ${agent_cmd[*]}"
