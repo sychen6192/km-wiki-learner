@@ -75,6 +75,15 @@ def resolve(rel: str, *, for_write: bool) -> Path:
     if ".git" in path.parts:
         raise ToolError("拒絕：不能碰 .git")
     if for_write:
+        # Reads range over the whole repo — AGENTS.md, the prompts, the
+        # extracted material. Writes do not: the vault is the only place the
+        # librarian is allowed to leave anything. A model that drops
+        # `Notes/Foo.md` at the repo root has written a note that no longer
+        # exists as far as scan and lint are concerned, and the wikilink
+        # pointing at it silently becomes a dangling one, so say where it goes.
+        if path != VAULT and VAULT not in path.parents:
+            suggestion = f"，你要的可能是 vault/{str(rel).lstrip('/')}"
+            raise ToolError(f"拒絕：只能寫在 vault/ 底下（收到 {rel}）{suggestion}")
         if path == RAW or RAW in path.parents:
             raise ToolError(f"拒絕：Raw/ 是不可變素材層，只能讀（{rel}）")
         if path.suffix.lower() not in (".md", ".json", ""):
