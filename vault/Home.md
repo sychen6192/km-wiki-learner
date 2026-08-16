@@ -14,18 +14,15 @@
 
 <!-- km:stats:start -->
 > [!info] 圖書館現況 · 2026-08-17
-> 筆記 **11** 篇 — 🌱 seed 2 · 🌿 budding 6 · 🌳 evergreen 3
-> 待長出的連結（frontier）**10** · 到期複習 **0** · Inbox 待辦 **0** · Raw 待消化 **2**
+> 筆記 **9** 篇 — 🌱 seed 1 · 🌿 budding 5 · 🌳 evergreen 3
+> 待長出的連結（frontier）**7** · 到期複習 **0** · Inbox 待辦 **1** · Raw 待消化 **2**
 
 **知識前緣** — 已被引用但還不存在的頁面（明日候選）：
 - [[Digital Garden]] ×6
 - [[Agent Harness]] ×5
 - [[Andrej Karpathy]] ×4
-- [[Japanese N4 Grammar Patterns]] ×2
 - [[PARA method]] ×2
-- [[Krashen's Input Hypothesis]] ×1
 - [[KV quantization]] ×1
-- [[Maps/Japanese Language]] ×1
 - [[paged attention]] ×1
 - [[sliding window]] ×1
 
