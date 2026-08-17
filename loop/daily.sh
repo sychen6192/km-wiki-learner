@@ -130,7 +130,14 @@ take_lock() {
         "$(cat "/proc/$$/winpid" 2>/dev/null || echo '?')" "$(date +%T)" > "$LOCK/pid"
     touch "$BEAT"
     # Stops on its own once the lock is gone, so it can never outlive the run.
-    ( while touch "$BEAT" 2>/dev/null; do sleep "$BEAT_EVERY"; done ) &
+    #
+    # stdio goes to /dev/null, and that is load-bearing rather than tidiness:
+    # killing this subshell does not reap the `sleep` it is currently inside, and
+    # an inherited pipe stays open as long as that sleep lives. A caller reading
+    # our output — CI, a wrapper, `$(...)` — would then block for a full
+    # heartbeat interval after the loop had already finished, looking hung. An
+    # interactive terminal never shows this, which is how it survives review.
+    ( while touch "$BEAT" 2>/dev/null; do sleep "$BEAT_EVERY"; done ) >/dev/null 2>&1 &
     BEAT_PID=$!
 
     # Ctrl-C must actually stop the loop. A bare INT handler would clean up and
