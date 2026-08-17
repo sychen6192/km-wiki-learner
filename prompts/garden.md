@@ -6,6 +6,10 @@
 
 1. 逐條修掉上面的 **ERROR**（frontmatter 缺欄位、非法值、壞日期）。只動 frontmatter，不改內文。
 2. **WARN 的孤兒**：把它連進最相關的 Map 或概念筆記；真的無處可放就留著。
-3. 不新增筆記、不改寫內容、不動 `vault/Raw/`、不動 `<!--SR:...-->` 註解。
+3. **WARN 缺 `source_date`**：補上該來源自己的最後更新日。從筆記引用的原始素材
+   （`loop/state/extracted/` 或內文記的出處）找得到日期就填，**找不到就填 `unknown`** ——
+   不要用推測的日期，那和編造來源是同一件事。填 `unknown` 或日期超過一年的，
+   依 Style Guide 在摘要開頭補上過期提示那一行。
+4. 不新增筆記、不改寫內容、不動 `vault/Raw/`、不動 `<!--SR:...-->` 註解。
    dangling link 是正常的知識前緣，**不要**為了消滅它們而亂建頁面。
-4. 完成後跑 `"$KM_PYTHON" tools/vault.py lint` 確認 0 error。**不要 git commit 或 push。**
+5. 完成後跑 `"$KM_PYTHON" tools/vault.py lint` 確認 0 error。**不要 git commit 或 push。**

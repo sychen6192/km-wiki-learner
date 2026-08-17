@@ -47,6 +47,10 @@ ORPHAN_DIRS = ("Notes", "Sources")
 STATS_START = "<!-- km:stats:start -->"
 STATS_END = "<!-- km:stats:end -->"
 STALE_SEED_DAYS = 14
+# A source older than this is flagged so notes built on it can date their claims
+# instead of stating them as current fact.
+STALE_SOURCE_DAYS = 365
+UNKNOWN_DATE = "unknown"
 # Ingestion watermarks ("where did I get to last time") for external sources.
 # Lives under loop/state/, which is gitignored — private to each machine.
 CURSOR_FILE = "loop/state/cursors.json"
@@ -290,6 +294,21 @@ def build_report(vault: Vault, today: dt.date) -> dict:
         if n.status in status_counts:
             status_counts[n.status] += 1
 
+    # Sources whose material predates the last year, or that never said when it
+    # was written. Notes resting on these should date their claims rather than
+    # assert them as current.
+    stale_sources: dict = {}
+    for n in vault.notes:
+        if n.folder != "Sources":
+            continue
+        raw = str((n.fm or {}).get("source_date", "")).strip()
+        if raw == UNKNOWN_DATE:
+            stale_sources[n.rel] = "undated"
+            continue
+        dated = n.date("source_date")
+        if dated and (today - dated).days > STALE_SOURCE_DAYS:
+            stale_sources[n.rel] = f"{(today - dated).days // 365 or 1}y+"
+
     return {
         "generated": today.isoformat(),
         "totals": {
@@ -301,12 +320,14 @@ def build_report(vault: Vault, today: dt.date) -> dict:
             "due_reviews": len(due_reviews),
             "inbox_open": len(vault.inbox_items()),
             "pending_raw": len(pending_raw),
+            "stale_sources": len(stale_sources),
         },
         "inbox": vault.inbox_items(),
         "pending_raw": pending_raw,
         "frontier": frontier,
         "stubs": sorted(stubs),
         "stale_seeds": sorted(stale_seeds),
+        "stale_sources": stale_sources,
         "orphans": sorted(orphans),
         "due_reviews": sorted(due_reviews, key=lambda d: d["review_after"]),
     }
@@ -331,12 +352,19 @@ def lint(vault: Vault, today: dt.date, strict: bool):
                 errors.append(f"{n.rel}: missing frontmatter key {key!r}")
         if "status" in n.fm and n.status not in VALID_STATUS:
             errors.append(f"{n.rel}: invalid status {n.status!r} (want one of {', '.join(VALID_STATUS)})")
-        for key in ("created", "updated", "review_after"):
+        for key in ("created", "updated", "review_after", "source_date"):
             raw = n.fm.get(key)
-            if isinstance(raw, str) and raw and n.date(key) is None:
+            if isinstance(raw, str) and raw and raw != UNKNOWN_DATE and n.date(key) is None:
                 errors.append(f"{n.rel}: {key} is not an ISO date: {raw!r}")
+        # A digest that does not say how old its source is claims, by omission,
+        # to be current — and a stale internal doc reads exactly like a live one.
+        if n.folder == "Sources" and not str(n.fm.get("source_date", "")).strip():
+            warnings.append(f"{n.rel}: no source_date (how old is the source? "
+                            f"use {UNKNOWN_DATE} if it is genuinely undated)")
 
     report = build_report(vault, today)
+    for rel, age in sorted(report["stale_sources"].items()):
+        warnings.append(f"{rel}: source is {age} old — notes citing it should date their claims")
     for rel in report["orphans"]:
         warnings.append(f"{rel}: orphan (no inbound or outbound links)")
     for rel in report["stale_seeds"]:

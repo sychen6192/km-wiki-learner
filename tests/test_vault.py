@@ -135,6 +135,59 @@ class TestScan(VaultFixture):
         self.assertEqual(r["totals"]["notes"], 1)
 
 
+class TestSourceDating(VaultFixture):
+    """A digest that hides its source's age reads as current — flag it."""
+
+    def test_missing_source_date_warns_but_does_not_fail(self):
+        write(self.root, "Sources/Digest.md", note(body="Summary. [[Alpha]] " + "word " * 80))
+        write(self.root, "Notes/Alpha.md", note(body="Concept. [[Digest]] " + "word " * 80))
+        out = self._lint()
+        self.assertIn("no source_date", out)
+        self.assertEqual(vt.lint(vt.Vault(self.root), TODAY, strict=False), 0)
+
+    def test_undated_and_old_sources_are_reported_with_their_age(self):
+        write(self.root, "Sources/Undated.md",
+              note(extra="source_date: unknown\n", body="[[Alpha]] " + "word " * 80))
+        write(self.root, "Sources/Ancient.md",
+              note(extra="source_date: 2022-01-01\n", body="[[Alpha]] " + "word " * 80))
+        write(self.root, "Sources/Fresh.md",
+              note(extra="source_date: 2026-08-01\n", body="[[Alpha]] " + "word " * 80))
+        write(self.root, "Notes/Alpha.md",
+              note(body="[[Undated]] [[Ancient]] [[Fresh]] " + "word " * 80))
+
+        r = self.scan()
+        self.assertEqual(r["stale_sources"],
+                         {"Sources/Ancient.md": "4y+", "Sources/Undated.md": "undated"})
+        self.assertEqual(r["totals"]["stale_sources"], 2)
+
+        out = self._lint()
+        self.assertIn("Sources/Ancient.md: source is 4y+ old", out)
+        self.assertIn("Sources/Undated.md: source is undated", out)
+        self.assertNotIn("Sources/Fresh.md: source is", out)
+        # 'unknown' is a legitimate value, not a malformed date
+        self.assertNotIn("ERROR", out)
+
+    def test_malformed_source_date_is_an_error(self):
+        write(self.root, "Sources/Bad.md",
+              note(extra="source_date: last summer\n", body="[[Alpha]] " + "word " * 80))
+        write(self.root, "Notes/Alpha.md", note(body="[[Bad]] " + "word " * 80))
+        self.assertIn("source_date is not an ISO date", self._lint())
+        self.assertEqual(vt.lint(vt.Vault(self.root), TODAY, strict=False), 1)
+
+    def test_only_sources_are_asked_for_a_source_date(self):
+        write(self.root, "Notes/Alpha.md", note(body="[[Beta]] " + "word " * 80))
+        write(self.root, "Maps/Beta.md", note(body="[[Alpha]] " + "word " * 80))
+        self.assertNotIn("source_date", self._lint())
+
+    def _lint(self) -> str:
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            vt.lint(vt.Vault(self.root), TODAY, strict=False)
+        return buf.getvalue()
+
+
 class TestLint(VaultFixture):
     def test_errors_fail_and_clean_passes(self):
         write(self.root, "Notes/Bad.md", "---\nstatus: banana\ncreated: nope\n---\nx\n")

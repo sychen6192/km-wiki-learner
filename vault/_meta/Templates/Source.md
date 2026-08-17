@@ -5,11 +5,16 @@ updated: {{date}}
 tags: [source]
 sources:
   - {{url}}
+source_date: {{來源自己的最後更新日 YYYY-MM-DD，查不到就寫 unknown}}
 ---
 
 # {{source-title}}
 
-> 來源：{{url}}（作者／年份）
+> 來源：{{source-title}}／{{出處系統或網站}}（作者：{{author}}，最後更新：{{source_date}}）
+> 內部文件另記可回溯 ID：{{doc_id}}
+
+（`source_date` 超過一年或 unknown 時，這裡加一行：
+`> ⚠️ 此來源最後更新於 YYYY-MM，內容可能已過期。`）
 
 **一句話總結**：……
 
