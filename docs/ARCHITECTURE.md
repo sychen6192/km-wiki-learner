@@ -78,11 +78,15 @@ vault/**/*.md ──vault.py scan──▶ scan.json │
 
 | 用途 | 需要 | 例 |
 |---|---|---|
-| `KM_VISION_MODEL` | **vision**，不需要 tools | `qwen3.8:27b` |
+| `KM_VISION_MODEL` | **vision**，不需要 tools | `anthropic/claude-opus-5-5`、`qwen3.8:27b` |
 | `KM_MODEL`（agent） | **tools**，vision 可有可無 | `qwen3.6:35b-a3b` |
 
 沒有 tool calling 的模型再聰明也寫不了檔案。用 Ollama 的話，
 `curl -s $KM_API_BASE/api/tags | jq '.models[] | {name, capabilities}'` 可以確認。
+
+`KM_VISION_MODEL` 以 `anthropic/` 開頭就走 Claude（官方 `anthropic` SDK，讀 `ANTHROPIC_API_KEY`），
+否則走 `KM_API_BASE` 的 Ollama。SDK 是選用依賴，跟 tesseract 一樣：沒選這個後端就不需要裝，
+裝了沒 key 會在素材清單寫明原因並退回 OCR。
 
 ---
 
@@ -104,8 +108,15 @@ vault/**/*.md ──vault.py scan──▶ scan.json │
 `画家(がが)`、`パートで働く(はたく)`、`歯医者(はやし)`。同一頁 300dpi 全部正確。
 猜讀音和編造章節是同一種錯，只是規模小。
 
-抽取結果有快取，key 是**來源 mtime ＋ recipe**（模型／DPI／頁數上限）。
-改設定會重抽——早期版本只看 mtime，換模型會拿到舊結果而且回報成功。
+**作業的紅筆只有 vision 讀得到。** OCR 輸出沒有顏色，手寫數字也常常讀錯或整個漏掉，
+所以 `--list` 的報告會在 OCR 讀的檔案（和掃描 App 附的文字層）旁邊註明「紅筆批改讀不到」，
+agent 看到就不寫錯題表。掃描 App 存的 PDF 常內嵌 OCR 文字層，看起來像一般 PDF；
+`pdfimages` 若顯示過半頁面是整頁大圖，就當掃描件，設了 vision 時照樣逐頁轉錄。
+
+抽取結果有快取，key 是**來源內容的 sha256 ＋ recipe**（模型／DPI／頁數上限／轉錄 prompt）。
+改設定會重抽——早期版本只看 mtime，換模型會拿到舊結果而且回報成功；而 mtime 在 CI 每次
+fresh checkout 都會變，用它判斷會讓付費的 vision 每天重讀同一份檔。vision 失敗退回 OCR 的結果
+不算快取命中，下一圈會再試。
 
 ---
 
@@ -120,7 +131,8 @@ vault/**/*.md ──vault.py scan──▶ scan.json │
 | `KM_NO_PULL` / `KM_NO_PUSH` | — | 跳過對應 git 步驟 |
 | `KM_TIMEOUT` | 3600 | agent 超時秒數 |
 | `KM_PYTHON` | 自動偵測 | 工具鏈用的直譯器 |
-| `KM_VISION_MODEL` | — | 設了掃描件才走 vision |
+| `KM_VISION_MODEL` | — | 設了掃描件才走 vision；`anthropic/…` 走 Claude，其他走 Ollama |
+| `KM_VISION_EFFORT` | `medium` | Claude 的 effort（`low`～`max`） |
 | `KM_RASTER_DPI` | 200 | 掃描件轉圖解析度（**教材建議 300**） |
 | `KM_VISION_MAX_PAGES` | 0（全部） | 先試幾頁 |
 | `KM_LOCK_STALE_SEC` | 120 | 心跳停多久算廢鎖 |

@@ -66,7 +66,7 @@ make daily                                  # = ./loop/daily.sh
 
 - **cron**：`make install-cron` （預設每天 05:30，可 `make install-cron TIME=06:00`）
 - **systemd user timer**（筆電推薦，睡過頭會補跑）：`make install-systemd`
-- **GitHub Actions**（免掛機）：repo Settings → Secrets 加 `ANTHROPIC_API_KEY`，把本 repo 推上 GitHub 即可 — [`.github/workflows/daily.yml`](.github/workflows/daily.yml) 每天 05:30（Asia/Taipei）自動跑並 push 成果；也可在 Actions 頁手動觸發並填 `topic` 做隨選深潛。可用 repo Variables `KM_MODEL`、`KM_MAX_ITEMS` 覆寫預設。
+- **GitHub Actions**（免掛機）：repo Settings → Secrets 加 `ANTHROPIC_API_KEY`，把本 repo 推上 GitHub 即可 — [`.github/workflows/daily.yml`](.github/workflows/daily.yml) 每天 05:30（Asia/Taipei）自動跑並 push 成果；也可在 Actions 頁手動觸發並填 `topic` 做隨選深潛。可用 repo Variables `KM_MODEL`、`KM_VISION_MODEL`、`KM_MAX_ITEMS` 覆寫預設。掃描件預設交給 `anthropic/claude-opus-5-5` 轉錄，轉好的文字存在 Actions cache，不會每天重讀。
 
 ### 日常操作（全部在 Obsidian 裡）
 
@@ -84,10 +84,15 @@ make daily                                  # = ./loop/daily.sh
 - **預算**：`KM_MAX_ITEMS`（預設 3 個工作項/天）控制成本上限。
 - **模型**：`KM_MODEL=anthropic/claude-sonnet-4-5` 之類（`provider/model` 格式，`opencode models` 可列出）。
 - **本機私有指令**：`loop/local/*.md`（gitignored）會注入每天的 prompt，優先級同 Inbox — 適合放只屬於這台機器的來源與偏好，範例見 [`loop/local.example.md`](loop/local.example.md)。
-- **掃描件用 vision 讀**：`KM_VISION_MODEL=qwen3.8:27b make extract` — 密排、小字、多語混排的
-  教材，OCR 吐的是像文字的雜訊，而下游模型會拿自己的先驗把雜訊補成一份看似合理的假摘要。
-  vision 逐頁轉錄準得多，代價是一頁 1～4 分鐘（`KM_VISION_MAX_PAGES` 可先試幾頁）。
-  連不上模型會自動退回 OCR。
+- **掃描件與批改過的作業用 vision 讀**：密排、小字、多語混排的教材，OCR 吐的是像文字的雜訊，
+  而下游模型會拿自己的先驗把雜訊補成一份看似合理的假摘要；作業上的**紅筆批改 OCR 根本看不到**
+  （它不分顏色，也讀不好手寫）。vision 逐頁轉錄，手寫會標上筆的顏色（`〔手寫·黑：1，被紅筆劃掉〕`
+  `〔手寫·紅：4〕`），迴圈再對照解答頁寫出錯題表。兩種接法：
+  - Claude（GitHub Actions 預設）：`pip install anthropic`，設 `ANTHROPIC_API_KEY`，
+    `KM_VISION_MODEL=anthropic/claude-opus-5-5 make extract`。費用大約每頁 US$0.05–0.15，同一份檔案只讀一次。
+  - 自架 Ollama：`KM_VISION_MODEL=qwen3.8:27b make extract`，一頁 1～4 分鐘。
+
+  `KM_VISION_MAX_PAGES` 可先試幾頁。連不上模型會自動退回 OCR，素材清單會註明「紅筆批改讀不到」。
 - **接上外部來源（MCP）**：讓迴圈每天自己去某個系統抓新素材，含「從哪裡抓起」的游標機制 — 見 [docs/SOURCES.md](docs/SOURCES.md)。
 - **換掉 opencode**：`KM_AGENT_CMD="claude -p" make daily` — prompt 是純文字，agent 只是執行器。
 - **接自己的模型（不裝任何 agent CLI）**：`tools/agent.py` 是內建的極簡 tool-calling

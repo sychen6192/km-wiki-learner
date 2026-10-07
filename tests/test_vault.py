@@ -283,10 +283,10 @@ class TestExtract(unittest.TestCase):
             zf.writestr("word/document.xml",
                         "<w:document><w:body><w:p><w:t>第一課</w:t></w:p>"
                         "<w:p><w:t>なければならない</w:t></w:p></w:body></w:document>")
-        text, method = self.extract.from_docx(path)
-        self.assertEqual(method, "docx")
-        self.assertIn("第一課", text)
-        self.assertIn("なければならない", text)
+        result = self.extract.from_docx(path)
+        self.assertEqual(result.method, "docx")
+        self.assertIn("第一課", result.text)
+        self.assertIn("なければならない", result.text)
 
     def test_unsupported_format_reports_instead_of_crashing(self):
         with self.assertRaises(RuntimeError) as ctx:

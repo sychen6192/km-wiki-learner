@@ -39,6 +39,27 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq poppler-utils tesseract-ocr tesseract-ocr-jpn
 
+      # Scans and homework photos are read by Claude (KM_VISION_MODEL below),
+      # which tools/extract.py reaches through the official SDK. OCR cannot see
+      # red ink, so without this the corrections never reach the wiki.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the Anthropic SDK
+        run: python -m pip install --quiet anthropic
+
+      # Every run starts from a fresh checkout, so without this every page in
+      # Raw/ would be sent to the vision model again every day. extract.py
+      # matches cached text to its source by content hash and recipe, so a
+      # restored cache is only used where it is still right.
+      - name: Restore extracted text
+        uses: actions/cache/restore@v4
+        with:
+          path: loop/state/extracted
+          key: extracted-${{ github.run_id }}
+          restore-keys: extracted-
+
       - name: Configure git identity
         run: |
           git config user.name "km-wiki-bot"
@@ -48,6 +69,16 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           KM_MODEL: ${{ vars.KM_MODEL || 'anthropic/claude-sonnet-4-5' }}
+          KM_VISION_MODEL: ${{ vars.KM_VISION_MODEL || 'anthropic/claude-opus-5-5' }}
           KM_MAX_ITEMS: ${{ vars.KM_MAX_ITEMS || '3' }}
           KM_TOPIC: ${{ inputs.topic }}
         run: ./loop/daily.sh
+
+      # Saved under a fresh key every run (caches are immutable once written),
+      # and even when the loop failed: pages already paid for stay paid for.
+      - name: Save extracted text
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: loop/state/extracted
+          key: extracted-${{ github.run_id }}

@@ -90,7 +90,16 @@ if command -v tesseract >/dev/null 2>&1; then
 else
     warn "沒有 tesseract，掃描件／照片無法辨識（macOS: brew install tesseract tesseract-lang / Windows: winget install UB-Mannheim.TesseractOCR）"
 fi
-if [[ -n "${KM_VISION_MODEL:-}" ]]; then
+if [[ "${KM_VISION_MODEL:-}" == anthropic/* ]]; then
+    sdk="$("${KM_PYTHON:-python3}" -c 'import anthropic; print(anthropic.__version__)' 2>/dev/null)"
+    if [[ -z "$sdk" ]]; then
+        warn "設了 KM_VISION_MODEL=$KM_VISION_MODEL 但沒裝 anthropic 套件，掃描件會退回 OCR（$KM_PYTHON -m pip install anthropic）"
+    elif [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+        warn "設了 KM_VISION_MODEL=$KM_VISION_MODEL 但沒有 ANTHROPIC_API_KEY，掃描件會退回 OCR"
+    else
+        ok "vision — 掃描件與作業交給 $KM_VISION_MODEL 逐頁轉錄（anthropic $sdk），紅筆批改讀得到"
+    fi
+elif [[ -n "${KM_VISION_MODEL:-}" ]]; then
     vision_base="${KM_API_BASE:-http://localhost:11434}"
     if curl -fsS -m 5 "$vision_base/api/tags" >/dev/null 2>&1; then
         ok "vision — 掃描件交給 $KM_VISION_MODEL 逐頁轉錄（$vision_base 連得上）"
@@ -98,7 +107,7 @@ if [[ -n "${KM_VISION_MODEL:-}" ]]; then
         warn "設了 KM_VISION_MODEL 但連不上 $vision_base，掃描件會退回 OCR"
     fi
 else
-    warn "沒設 KM_VISION_MODEL，掃描件走 OCR。密排小字的教材建議改用 vision，OCR 的雜訊會讓模型自行腦補"
+    warn "沒設 KM_VISION_MODEL，掃描件走 OCR：密排小字會變雜訊，作業上的紅筆批改也讀不到（建議 KM_VISION_MODEL=anthropic/claude-opus-5-5）"
 fi
 
 echo
