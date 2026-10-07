@@ -1,7 +1,7 @@
 ---
 status: budding
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-10-07
 tags: [map, jp-n4, vocabulary]
 review_after: 2026-09-07
 sources:
@@ -12,7 +12,8 @@ sources:
 > Map of Content for N4 lexical domain. Focuses on thematic word groups and structural patterns typical of the test.
 
 ## 📚 核心教材
-- [[N4語彙マスター U11–U15]]：主題分類單字與演練題庫。
+- [[N4語彙マスター_6_語彙_U11_U15|N4語彙マスター U11–U15]]：主題分類單字與演練題庫。
+- [[N4語彙マスター_8_実戦演習U16_U20|N4語彙マスター U16–U20 実戦練習]]：16 題實戰練習與我的錯題（助詞搭配、しょうたい vs しょうかい）。
 
 ## 🔑 重點語法結構（概念筆記）
 - [[Japanese Suffix 製]]：表材質或產地之接續規則。
