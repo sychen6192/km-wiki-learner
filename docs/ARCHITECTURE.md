@@ -132,7 +132,7 @@ fresh checkout 都會變，用它判斷會讓付費的 vision 每天重讀同一
 | `KM_TIMEOUT` | 3600 | agent 超時秒數 |
 | `KM_PYTHON` | 自動偵測 | 工具鏈用的直譯器 |
 | `KM_VISION_MODEL` | — | 設了掃描件才走 vision；`anthropic/…` 走 Claude，其他走 Ollama |
-| `KM_VISION_EFFORT` | `medium` | Claude 的 effort（`low`～`max`） |
+| `KM_VISION_EFFORT` | 模型預設（Opus 5.5 是 `medium`） | Claude 的 effort（`low`～`max`）；不支援 effort 的舊模型不要設 |
 | `KM_RASTER_DPI` | 200 | 掃描件轉圖解析度（**教材建議 300**） |
 | `KM_VISION_MAX_PAGES` | 0（全部） | 先試幾頁 |
 | `KM_LOCK_STALE_SEC` | 120 | 心跳停多久算廢鎖 |

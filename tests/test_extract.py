@@ -119,7 +119,7 @@ class TestClaudeRequest(ClaudeFixture):
         self.assertEqual(text, "〔手寫·黑：1，被紅筆劃掉〕〔手寫·紅：4〕")   # thinking skipped
         request = calls[0]
         self.assertEqual(request["model"], "claude-opus-5-5")   # provider prefix stripped
-        self.assertEqual(request["output_config"], {"effort": "medium"})
+        self.assertNotIn("output_config", request)   # model default unless asked
         self.assertEqual(request["fallbacks"], "default")
         self.assertIn("server-side-fallback-2026-07-01", request["betas"])
         image, prompt = request["messages"][0]["content"]
@@ -189,6 +189,12 @@ class TestClaudeFailures(ClaudeFixture):
         with self.assertRaises(extract.VisionError):
             self.quietly(extract.vision_pages, self.pages)
         self.assertEqual(len(calls), 1)
+
+    def test_when_every_page_fails_the_report_says_why(self):
+        self.use("BadRequestError")
+        with self.assertRaises(RuntimeError) as ctx:
+            self.quietly(extract.vision_pages, self.pages)
+        self.assertIn("fake BadRequestError", str(ctx.exception))
 
     def test_one_bad_page_does_not_cost_the_others(self):
         self.use(message("第一頁"), "RateLimitError", message(stop_reason="refusal"))
@@ -419,7 +425,7 @@ class TestClaudeOverTheWire(unittest.TestCase):
         self.assertEqual(headers["x-api-key"], "sk-ant-test")
         self.assertEqual(body["model"], "claude-opus-5-5")
         self.assertEqual(body["fallbacks"], "default")
-        self.assertEqual(body["output_config"], {"effort": "medium"})
+        self.assertNotIn("output_config", body)
         self.assertTrue(body["stream"])
         self.assertEqual(body["messages"][0]["content"][0]["source"]["media_type"], "image/jpeg")
 

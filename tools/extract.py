@@ -30,7 +30,8 @@ be reached.
                          (pip install anthropic; reads ANTHROPIC_API_KEY)
                          anything else, e.g. qwen3.8:27b → an Ollama server
                          unset → OCR, as before
-    KM_VISION_EFFORT     Claude only: low | medium | high | xhigh | max (default medium)
+    KM_VISION_EFFORT     Claude only: low | medium | high | xhigh | max; unset leaves
+                         the model's own default (medium on claude-opus-5-5)
     KM_API_BASE          Ollama-compatible server (default http://localhost:11434)
     KM_VISION_MAX_PAGES  stop after N pages (0 = all); a page takes minutes
     KM_VISION_TIMEOUT    seconds per page (default 900)
@@ -218,7 +219,9 @@ def uses_claude() -> bool:
 
 
 def vision_effort() -> str:
-    return os.environ.get("KM_VISION_EFFORT", "").strip() or "medium"
+    # Unset means the model's own default. Sending a level to a model that has
+    # no effort control (Sonnet 4.5, Haiku 4.5) is a 400 on every page.
+    return os.environ.get("KM_VISION_EFFORT", "").strip()
 
 
 def extraction_recipe() -> str:
@@ -236,7 +239,8 @@ def extraction_recipe() -> str:
         prompt = hashlib.sha256(VISION_PROMPT.encode("utf-8")).hexdigest()[:8]
         if uses_claude():
             return "|".join(["vision", vision_model(), f"edge{ANTHROPIC_LONG_EDGE}",
-                             vision_effort(), os.environ.get("KM_VISION_MAX_PAGES", "0"),
+                             vision_effort() or "default",
+                             os.environ.get("KM_VISION_MAX_PAGES", "0"),
                              prompt])
         return "|".join(["vision", vision_model(), dpi,
                          os.environ.get("KM_VISION_MAX_PAGES", "0"), prompt])
@@ -328,7 +332,6 @@ def ask_claude(image: Path) -> str:
     request = {
         "model": model,
         "max_tokens": 32000,
-        "output_config": {"effort": vision_effort()},
         "messages": [{"role": "user", "content": [
             # Image before the instructions: Claude reads it better that way.
             {"type": "image", "source": {
@@ -337,6 +340,8 @@ def ask_claude(image: Path) -> str:
             {"type": "text", "text": VISION_PROMPT},
         ]}],
     }
+    if vision_effort():
+        request["output_config"] = {"effort": vision_effort()}
     if model in ANTHROPIC_FALLBACK_MODELS:
         # A safety decline re-runs on the model Anthropic recommends for its
         # category, inside the same call, instead of losing the page.
@@ -398,6 +403,7 @@ def vision_pages(pages: list) -> Extraction:
     used = pages[:limit]
     chunks = []
     failures = 0
+    first_error = None
     for number, page in enumerate(used, start=1):
         print(f"    vision 第 {number}/{len(used)} 頁…", file=sys.stderr)
         try:
@@ -410,11 +416,14 @@ def vision_pages(pages: list) -> Extraction:
             # an hour thrown away — and the gap is named, so nothing downstream
             # mistakes a missing page for a blank one.
             failures += 1
+            first_error = first_error or exc
             body = f"[這頁沒讀到：{exc}]"
             print(f"      第 {number} 頁失敗：{exc}", file=sys.stderr)
         chunks.append(f"--- page {number} ---\n{body}")
     if failures == len(used):
-        raise RuntimeError(f"vision 每一頁都失敗（共 {failures} 頁）")
+        # The reason is the useful part: a misconfiguration fails every page
+        # the same way, and "all pages failed" alone sends nobody anywhere.
+        raise RuntimeError(f"vision 每一頁都失敗（共 {failures} 頁），第一頁的錯誤：{first_error}")
     if len(used) < len(pages):
         # Saying so matters: a silent stop reads downstream as "this is the
         # whole document", and the rest of the book quietly stops existing.
