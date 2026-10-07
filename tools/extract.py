@@ -109,6 +109,7 @@ EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 # next to each such file, because the agent cannot tell from the text alone
 # that the red-ink marking it is looking for was never there to read.
 HANDWRITING_BLIND = ("ocr", "pdftotext:scan")
+TRUNCATED = "[轉錄到這裡被截斷：超過輸出長度上限]"
 HANDWRITING_WARNING = "這份是掃描件但沒經過 vision：OCR 分不出顏色、也讀不好手寫，紅筆批改讀不到"
 
 # Written against a model that had just invented a textbook's contents rather
@@ -179,6 +180,8 @@ class Extraction(NamedTuple):
     text: str
     method: str
     retry: str = ""
+    note: str = ""          # worth reporting, but nothing to retry
+    complete: bool = False  # a vision transcript with every page read in full
 
 
 class OutOfTime(Exception):
@@ -302,10 +305,14 @@ def reusable(entry: dict, recipe: str) -> bool:
             and not entry.get("retry"))
 
 
-def good_vision(entry: dict) -> bool:
-    """Is this cached entry a finished vision transcript?"""
-    return (entry.get("status") == "ok" and not entry.get("retry")
-            and str(entry.get("method", "")).startswith("vision"))
+def vision_on_disk(entry: dict) -> bool:
+    """Does the text on disk for this entry come from a vision model?
+
+    Asked regardless of whether the entry is due for a retry: a transcript that
+    is waiting to be redone still sees the red ink, and is still worth more
+    than anything OCR could put in its place.
+    """
+    return entry.get("status") == "ok" and str(entry.get("method", "")).startswith("vision")
 
 
 def ask_vision(image: Path) -> str:
@@ -419,39 +426,50 @@ def ask_claude(image: Path) -> str:
     text = "".join(block.text for block in message.content if block.type == "text").strip()
     if message.stop_reason == "max_tokens":
         # Keep what was read, but never let a cut-off page pass for a whole one.
-        text += "\n[轉錄到這裡被截斷：超過輸出長度上限]"
+        text += f"\n{TRUNCATED}"
     return text
 
 
-def read_pages(pages: list, text_layer: str = "", source: str = "") -> Extraction:
+def read_pages(pages: list, text_layer: str = "", source: str = "",
+               keep_previous: bool = False) -> Extraction:
     """Turn page images into text — vision when configured, OCR otherwise.
 
     `text_layer` is what pdftotext found on a scan that carries one (phone
     scanner apps OCR the page and embed it). It is the fallback of choice when
     vision fails: the app's OCR is usually better than ours and costs nothing.
     `source` identifies the file the pages came from, for the page cache.
+    `keep_previous` says a vision transcript of this file already exists; if
+    vision fails now, any fallback would be thrown away, so none is attempted.
     """
-    retry = ""
+    retry = note = ""
     if vision_model():
         try:
             return vision_pages(pages, source)
         except OutOfTime:
             raise
         except Exception as exc:  # noqa: BLE001 — whatever it was, the material must survive
+            reason = f"vision 失敗（{exc}）"
+            if keep_previous:
+                raise RuntimeError(f"{reason}，保留先前的 vision 轉錄") from exc
+            if out_of_time():
+                raise OutOfTime() from exc
             # Losing the material because a server blinked would be worse than
-            # reading it badly, so fall through and say so.
-            retry = f"vision 失敗（{exc}）"
-            print(f"    {retry}，改用{'PDF 內嵌的文字層' if text_layer else ' OCR'}",
+            # reading it badly, so fall through and say so. A refusal or an
+            # oversized photo will fail the same way tomorrow, so that fallback
+            # is final; anything else is retried.
+            lasting = isinstance(exc, VisionError) and not exc.transient and not exc.fatal
+            retry, note = ("", reason) if lasting else (reason, "")
+            print(f"    {reason}，改用{'PDF 內嵌的文字層' if text_layer else ' OCR'}",
                   file=sys.stderr)
             if text_layer:
-                return Extraction(text_layer, "pdftotext:scan", retry)
+                return Extraction(text_layer, "pdftotext:scan", retry, note)
     if not have("tesseract"):
-        if retry:
-            raise RuntimeError(f"{retry}，而且沒有 tesseract 可以退回 OCR")
+        if retry or note:
+            raise RuntimeError(f"{retry or note}，而且沒有 tesseract 可以退回 OCR")
         raise RuntimeError("掃描件需要 tesseract 才能 OCR，或設 KM_VISION_MODEL 用視覺模型讀")
     langs = ocr_languages()
     chunks = [run(["tesseract", str(page), "-", "-l", langs]).stdout for page in pages]
-    return Extraction("\n\n".join(chunks), f"ocr:{langs}", retry)
+    return Extraction("\n\n".join(chunks), f"ocr:{langs}", retry, note)
 
 
 _deadline: float | None = None
@@ -476,7 +494,17 @@ def write_atomically(path: Path, text: str) -> None:
     # must be the text, on every platform.
     with partial.open("w", encoding="utf-8", newline="") as handle:
         handle.write(text)
-    os.replace(partial, path)
+    for attempt in range(5):
+        try:
+            os.replace(partial, path)
+            return
+        except PermissionError:
+            # Windows refuses to replace a file another process has open — a
+            # sync client uploading it, a virus scanner reading it. It lets go
+            # within moments.
+            if attempt == 4:
+                raise
+            time.sleep(0.2 * (attempt + 1))
 
 
 def vision_pages(pages: list, source: str = "") -> Extraction:
@@ -485,12 +513,20 @@ def vision_pages(pages: list, source: str = "") -> Extraction:
     chunks = []
     read = failures = transient = deferred = 0
     first_error = None
+    stopped = None
+    truncated = False
     for number, page in enumerate(used, start=1):
+        if stopped is not None:
+            deferred += 1
+            chunks.append(f"--- page {number} ---\n[這頁還沒讀：{stopped}]")
+            continue
         cache = cached_page(source, number)
         if cache is not None and cache.exists():
             # Paid for on an earlier run — a killed run, or one where another
             # page failed. Only the missing pages cost anything.
-            chunks.append(f"--- page {number} ---\n{cache.read_text(encoding='utf-8')}")
+            body = cache.read_text(encoding="utf-8")
+            truncated = truncated or TRUNCATED in body
+            chunks.append(f"--- page {number} ---\n{body}")
             read += 1
             continue
         if out_of_time():
@@ -502,7 +538,14 @@ def vision_pages(pages: list, source: str = "") -> Extraction:
             body = ask_vision(page).strip()
         except (VisionError, OSError) as exc:
             if getattr(exc, "fatal", False):
-                raise
+                if not read:
+                    raise
+                # Pages already read (most likely from the cache) are worth
+                # keeping; the rest wait for whatever broke to be fixed.
+                stopped = exc
+                deferred += 1
+                chunks.append(f"--- page {number} ---\n[這頁還沒讀：{exc}]")
+                continue
             # One bad page must not discard the good ones. At minutes apiece,
             # restarting a whole book because the server hiccuped on page 18 is
             # an hour thrown away — and the gap is named, so nothing downstream
@@ -514,15 +557,22 @@ def vision_pages(pages: list, source: str = "") -> Extraction:
             print(f"      第 {number} 頁失敗：{exc}", file=sys.stderr)
         else:
             read += 1
+            truncated = truncated or TRUNCATED in body
             if cache is not None:
-                write_atomically(cache, body)
+                try:
+                    write_atomically(cache, body)
+                except OSError as exc:
+                    # The page is read and in hand; failing to cache it must
+                    # not cost the run.
+                    print(f"      第 {number} 頁快取寫不進去：{exc}", file=sys.stderr)
         chunks.append(f"--- page {number} ---\n{body}")
     if not read:
         if deferred:
             raise OutOfTime()
         # The reason is the useful part: a misconfiguration fails every page
         # the same way, and "all pages failed" alone sends nobody anywhere.
-        raise RuntimeError(f"vision 每一頁都失敗（共 {failures} 頁），第一頁的錯誤：{first_error}")
+        raise VisionError(f"vision 每一頁都失敗（共 {failures} 頁），第一頁的錯誤：{first_error}",
+                          transient=bool(transient))
     if len(used) < len(pages):
         # Saying so matters: a silent stop reads downstream as "this is the
         # whole document", and the rest of the book quietly stops existing.
@@ -538,7 +588,9 @@ def vision_pages(pages: list, source: str = "") -> Extraction:
     retry = "、".join(part for part in (
         f"{transient} 頁暫時讀不到" if transient else "",
         f"{deferred} 頁因時間預算延後" if deferred else "") if part)
-    return Extraction("\n\n".join(chunks), method, f"{retry}，下一圈補讀" if retry else "")
+    complete = not (failures or deferred or truncated or len(used) < len(pages))
+    return Extraction("\n\n".join(chunks), method, f"{retry}，下一圈補讀" if retry else "",
+                      complete=complete)
 
 
 def ocr_languages() -> str:
@@ -608,7 +660,7 @@ def raster_pages(path: Path, tmp: str) -> list:
     return sorted(Path(tmp).glob("page*"))
 
 
-def from_pdf(path: Path, source: str = "") -> Extraction:
+def from_pdf(path: Path, source: str = "", keep_previous: bool = False) -> Extraction:
     if not have("pdftotext"):
         raise RuntimeError("需要 pdftotext（macOS: brew install poppler / Debian: apt install poppler-utils）")
     done = run(["pdftotext", "-layout", str(path), "-"])
@@ -632,22 +684,24 @@ def from_pdf(path: Path, source: str = "") -> Extraction:
         pages = raster_pages(path, tmp)
         if not pages:
             raise RuntimeError("PDF 無法轉成圖片")
-        return read_pages(pages, text_layer, source)
+        return read_pages(pages, text_layer, source, keep_previous)
 
 
-def from_image(path: Path, source: str = "") -> Extraction:
-    return read_pages([path], source=source)
+def from_image(path: Path, source: str = "", keep_previous: bool = False) -> Extraction:
+    return read_pages([path], source=source, keep_previous=keep_previous)
 
 
-def extract(path: Path, source: str = "") -> Extraction:
-    """Read one Raw file. `source` (its content hash) keys the page cache."""
+def extract(path: Path, source: str = "", keep_previous: bool = False) -> Extraction:
+    """Read one Raw file. `source` (its content hash) keys the page cache;
+    `keep_previous` means a vision transcript exists that a fallback must not
+    replace."""
     suffix = path.suffix.lower()
     if suffix == ".docx":
         return from_docx(path)  # stdlib zipfile, so any filename opens fine
     if suffix == ".pdf" or suffix in IMAGE_SUFFIXES:
         reader = from_pdf if suffix == ".pdf" else from_image
         with staged_for_external_tools(path) as usable:
-            return reader(usable, source)
+            return reader(usable, source, keep_previous)
     raise RuntimeError(f"還不支援 {suffix} 格式，請自行轉成文字後再放進 Raw/")
 
 
@@ -705,11 +759,19 @@ def main(argv) -> int:
         # entries until the run gets to them.
         merged = dict(entries) if final else {**{k: v for k, v in previous.items()
                                                  if k not in entries}, **entries}
-        write_atomically(MANIFEST, json.dumps(merged, ensure_ascii=False, indent=2,
-                                              sort_keys=True) + "\n")
+        try:
+            write_atomically(MANIFEST, json.dumps(merged, ensure_ascii=False, indent=2,
+                                                  sort_keys=True) + "\n")
+        except OSError as exc:
+            print(f"km-wiki: 清單寫不進去（{exc}），下一個檔案再試", file=sys.stderr)
 
-    for path in raw_files():
-        rel = path.relative_to(REPO / "vault").as_posix()
+    def rel_of(path: Path) -> str:
+        return path.relative_to(REPO / "vault").as_posix()
+
+    # Material with no readable text yet goes first, so a long re-read (after a
+    # prompt change, say) never keeps today's homework waiting behind it.
+    for path in sorted(raw_files(), key=lambda p: previous.get(rel_of(p), {}).get("status") == "ok"):
+        rel = rel_of(path)
         if path.suffix.lower() in TEXT_SUFFIXES or path.suffix == "":
             entries[rel] = {
                 "status": "text",
@@ -737,23 +799,19 @@ def main(argv) -> int:
             entries[rel] = kept
             save()
             continue
-        if target.exists() and unchanged and not vision_model() and good_vision(before):
-            # A run without vision (a scheduled job missing the variable, a
-            # laptop without the key) must not replace a colour-aware
-            # transcript with OCR that cannot see the red ink.
+        # A vision transcript of exactly these bytes. Whatever happens below,
+        # OCR or a half-finished re-read must not take its place: OCR cannot
+        # see the red ink, and a gap is worse than yesterday's full page.
+        protected = target.exists() and unchanged and vision_on_disk(before)
+        if protected and not vision_model():
+            # A run without vision — a scheduled job missing the variable, a
+            # laptop without the key — keeps it, retry flag and all.
             entries[rel] = dict(kept, note="沒有設定 vision，沿用先前的 vision 轉錄")
-            save()
-            continue
-        if out_of_time():
-            entries[rel] = (dict(kept, sha256=before.get("sha256"), retry=True,
-                                 note="這次沒時間重抽，沿用先前的結果")
-                            if target.exists() and before.get("status") == "ok" else
-                            {"status": "deferred", "text": None, "method": None, "chars": 0})
             save()
             continue
 
         try:
-            result = extract(path, digest)
+            result = extract(path, digest, keep_previous=protected)
         except OutOfTime:
             entries[rel] = (dict(kept, sha256=before.get("sha256"), retry=True,
                                  note="這次沒時間重抽，沿用先前的結果")
@@ -778,18 +836,19 @@ def main(argv) -> int:
             save()
             continue
 
-        if not result.text.strip():
-            entries[rel] = {"status": "failed", "text": None, "method": result.method,
-                            "chars": 0, "note": "抽出來是空的（可能是空白頁或辨識失敗）"}
+        worse = (not result.text.strip() or str(result.method).startswith(HANDWRITING_BLIND)
+                 or (result.retry and before.get("complete")))
+        if protected and worse:
+            # Today's pages are in the page cache already; the next run puts
+            # the full new transcript together without paying for them again.
+            entries[rel] = dict(kept, retry=True,
+                                note=f"保留先前的 vision 轉錄（這次{result.retry or result.note or '讀不完整'}）")
             save()
             continue
 
-        if (result.retry and str(result.method).startswith(HANDWRITING_BLIND)
-                and target.exists() and unchanged and good_vision(before)):
-            # Vision was wanted and failed today. Yesterday's transcript of the
-            # same file, even under an older recipe, still sees the red ink;
-            # today's OCR does not. Keep it, and try vision again next run.
-            entries[rel] = dict(kept, retry=True, note=f"保留先前的 vision 轉錄（這次{result.retry}）")
+        if not result.text.strip():
+            entries[rel] = {"status": "failed", "text": None, "method": result.method,
+                            "chars": 0, "note": "抽出來是空的（可能是空白頁或辨識失敗）"}
             save()
             continue
 
@@ -807,9 +866,12 @@ def main(argv) -> int:
             "sha256": digest,
             "cached": False,
             "chars": len(result.text),
+            "complete": result.complete,
         }
         if result.retry:
             entries[rel].update(retry=True, note=result.retry)
+        elif result.note:
+            entries[rel]["note"] = result.note
         save()
 
     save(final=True)

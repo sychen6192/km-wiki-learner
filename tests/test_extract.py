@@ -283,6 +283,47 @@ class TestPageCache(ClaudeFixture):
             self.quietly(extract.vision_pages, self.pages, "source-sha")
         self.assertEqual(len(calls), 3)
 
+    def test_a_complete_read_says_so(self):
+        self.use(message("頁"))
+        self.assertTrue(self.quietly(extract.vision_pages, self.pages, "s").complete)
+        self.use(message("頁"), message("後半", stop_reason="max_tokens"), message("頁"))
+        self.assertFalse(self.quietly(extract.vision_pages, self.pages, "t").complete)
+        self.use(message("頁"))
+        with mock.patch.dict(os.environ, {"KM_VISION_MAX_PAGES": "2"}):
+            self.assertFalse(self.quietly(extract.vision_pages, self.pages, "u").complete)
+
+    def test_broken_credentials_after_cached_pages_keep_those_pages(self):
+        extract.write_atomically(extract.cached_page("source-sha", 1), "第一頁（之前讀過）")
+        self.use(message(), api_key=None)
+        result = self.quietly(extract.vision_pages, self.pages, "source-sha")
+        self.assertIn("第一頁（之前讀過）", result.text)
+        self.assertEqual(result.text.count("[這頁還沒讀"), 2)
+        self.assertTrue(result.retry)
+
+    def test_a_lasting_failure_on_every_page_is_final(self):
+        self.use(message(stop_reason="refusal"))
+        ocr = types.SimpleNamespace(stdout="OCR の文字")
+        with mock.patch.object(extract, "have", return_value=True), \
+                mock.patch.object(extract, "ocr_languages", return_value="jpn"), \
+                mock.patch.object(extract, "run", return_value=ocr):
+            result = self.quietly(extract.read_pages, self.pages[:1], "", "source-sha")
+        self.assertEqual(result.retry, "")           # asking again tomorrow costs money for nothing
+        self.assertIn("拒絕", result.note)
+
+    def test_no_fallback_is_attempted_when_its_result_would_be_thrown_away(self):
+        self.use("AuthenticationError")
+        with mock.patch.object(extract, "run") as ocr:
+            with self.assertRaises(RuntimeError) as ctx:
+                self.quietly(extract.read_pages, self.pages, "スキャナーの文字層", "s", True)
+        ocr.assert_not_called()
+        self.assertIn("保留先前的 vision 轉錄", str(ctx.exception))
+
+    def test_a_cache_write_that_fails_does_not_cost_the_page(self):
+        self.use(message("讀到了"))
+        with mock.patch.object(extract, "write_atomically", side_effect=PermissionError("locked")):
+            result = self.quietly(extract.vision_pages, self.pages[:1], "source-sha")
+        self.assertIn("讀到了", result.text)
+
     def test_out_of_time_defers_unread_pages_instead_of_failing(self):
         extract.write_atomically(extract.cached_page("source-sha", 1), "第一頁（之前讀過）")
         calls = self.use(message())
@@ -294,6 +335,24 @@ class TestPageCache(ClaudeFixture):
         self.assertIn("第一頁（之前讀過）", result.text)
         self.assertEqual(result.text.count("[這頁還沒讀"), 2)
         self.assertIn("延後", result.retry)
+
+
+class TestAtomicWrite(unittest.TestCase):
+    def test_a_briefly_locked_file_is_retried(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "manifest.json"
+            real = os.replace
+            failures = iter([PermissionError("in use"), PermissionError("in use")])
+
+            def flaky(src, dst):
+                failure = next(failures, None)
+                if failure:
+                    raise failure
+                real(src, dst)
+            with mock.patch.object(extract.os, "replace", side_effect=flaky), \
+                    mock.patch.object(extract.time, "sleep"):
+                extract.write_atomically(target, "{}")
+            self.assertEqual(target.read_text(encoding="utf-8"), "{}")
 
 
 class TestCacheAndReport(unittest.TestCase):
@@ -357,12 +416,24 @@ class TestFreshCheckout(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.reads = 0
+        self.order = []
         self.manifest = out / "manifest.json"
         self.target = out / "homework.jpg.txt"
 
-    def read(self, path, source=""):
+    def read(self, path, source="", keep_previous=False):
         self.reads += 1
-        return extract.Extraction(f"read #{self.reads}", f"vision:{CLAUDE}")
+        self.order.append(path.name)
+        return extract.Extraction(f"read #{self.reads}", f"vision:{CLAUDE}", complete=True)
+
+    def vision_down(self, path, source="", keep_previous=False):
+        """What read_pages does when vision fails: OCR, unless there is a
+        vision transcript to keep — then it gives up instead."""
+        if keep_previous:
+            raise RuntimeError("vision 失敗（API 掛了），保留先前的 vision 轉錄")
+        return extract.Extraction("OCR noise", "ocr:jpn", "vision 失敗（API 掛了）")
+
+    def new_prompt(self):
+        return mock.patch.object(extract, "VISION_PROMPT", extract.VISION_PROMPT + "。")
 
     def run_extract(self):
         with contextlib.redirect_stdout(io.StringIO()) as out:
@@ -395,7 +466,7 @@ class TestFreshCheckout(unittest.TestCase):
     def test_a_run_killed_halfway_keeps_the_files_it_finished(self):
         (self.raw / "second.jpg").write_bytes(b"\xff\xd8 second")
 
-        def dies_on_second(path, source=""):
+        def dies_on_second(path, source="", keep_previous=False):
             if path.name == "second.jpg":
                 raise KeyboardInterrupt
             return self.read(path)
@@ -416,12 +487,42 @@ class TestFreshCheckout(unittest.TestCase):
     def test_failed_vision_does_not_overwrite_an_older_transcript(self):
         self.run_extract()
         ocr = extract.Extraction("OCR noise", "ocr:jpn", "vision 失敗（API 掛了）")
-        with mock.patch.object(extract, "VISION_PROMPT", extract.VISION_PROMPT + "。"), \
-                mock.patch.object(extract, "extract", return_value=ocr):
+        with self.new_prompt(), mock.patch.object(extract, "extract", return_value=ocr):
             entry = self.run_extract()["Raw/homework.jpg"]
         self.assertEqual(self.target.read_text(encoding="utf-8"), "read #1")
         self.assertEqual(entry["method"], f"vision:{CLAUDE}")
         self.assertTrue(entry["retry"])
+
+    def test_the_transcript_survives_day_after_day_of_failures(self):
+        self.run_extract()
+        with self.new_prompt(), mock.patch.object(extract, "extract", side_effect=self.vision_down):
+            for _ in range(3):
+                entry = self.run_extract()["Raw/homework.jpg"]
+        self.assertEqual(self.target.read_text(encoding="utf-8"), "read #1")
+        self.assertEqual(entry["method"], f"vision:{CLAUDE}")
+
+    def test_a_partial_reread_does_not_replace_a_complete_transcript(self):
+        self.run_extract()
+        partial = extract.Extraction("一頁＋[這頁還沒讀]", f"vision:{CLAUDE}（2 頁延後）",
+                                     "2 頁因時間預算延後，下一圈補讀")
+        with self.new_prompt(), mock.patch.object(extract, "extract", return_value=partial):
+            entry = self.run_extract()["Raw/homework.jpg"]
+        self.assertEqual(self.target.read_text(encoding="utf-8"), "read #1")
+        self.assertTrue(entry["retry"])
+        # …and a run without vision after that still keeps it, retry flag or not.
+        with mock.patch.dict(os.environ, {"KM_VISION_MODEL": ""}):
+            entry = self.run_extract()["Raw/homework.jpg"]
+        self.assertEqual(self.target.read_text(encoding="utf-8"), "read #1")
+        self.assertTrue(entry["retry"])
+
+    def test_new_material_is_read_before_rereads(self):
+        self.run_extract()
+        (self.raw / "a-new-homework.jpg").write_bytes(b"\xff\xd8 new")    # sorts first anyway
+        (self.raw / "zz-new-homework.jpg").write_bytes(b"\xff\xd8 newer")
+        self.order.clear()
+        with self.new_prompt():
+            self.run_extract()
+        self.assertEqual(self.order, ["a-new-homework.jpg", "zz-new-homework.jpg", "homework.jpg"])
 
     def test_a_failed_retry_stays_marked_for_retry(self):
         with mock.patch.object(extract, "extract", return_value=extract.Extraction(
@@ -435,13 +536,17 @@ class TestFreshCheckout(unittest.TestCase):
         self.assertEqual(self.reads, 1)
 
     def test_out_of_time_defers_the_file(self):
-        with mock.patch.object(extract, "out_of_time", return_value=True):
+        with mock.patch.object(extract, "extract", side_effect=extract.OutOfTime):
             entry = self.run_extract()["Raw/homework.jpg"]
         self.assertEqual(entry["status"], "deferred")
-        self.assertEqual(self.reads, 0)
         self.assertIn("⏳", self.report)
         self.run_extract()
         self.assertEqual(self.reads, 1)
+
+    def test_the_budget_never_holds_back_files_that_need_no_vision(self):
+        with mock.patch.object(extract, "out_of_time", return_value=True):
+            entry = self.run_extract()["Raw/homework.jpg"]
+        self.assertEqual(entry["status"], "ok")     # the time limit is for vision pages only
 
 
 LISTING = """page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio

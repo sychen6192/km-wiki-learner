@@ -21,8 +21,9 @@ jobs:
   loop:
     runs-on: ubuntu-latest
     # 20 min of vision (KM_EXTRACT_BUDGET_SEC) + one page in flight + 60 min of
-    # agent + 15 min repair pass, with room to spare.
-    timeout-minutes: 120
+    # agent + 15 min repair pass, plus room for one file's OCR fallback when
+    # vision is down (OCR is not on the budget clock once a file has started).
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:

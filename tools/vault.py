@@ -343,12 +343,14 @@ def build_report(vault: Vault, today: dt.date) -> dict:
 
 
 def redo_items(vault: Vault) -> list:
-    """Sources marked `redo: vision` whose Raw file now has a vision transcript.
+    """Sources marked `redo: vision` whose material is now fully read by vision.
 
     Once a Source cites its Raw file, that file stops being pending — so a
     homework digest written from OCR, with no error table because the red ink
     was unreadable, would never be revisited when a proper transcript arrives
-    later. This is the work item that brings it back.
+    later. This is the work item that brings it back, once every Raw file the
+    Source cites has a complete vision transcript (a Source may cite the
+    homework and a separate answer key; half of that is not worth a rewrite).
     """
     manifest_path = vault.root.parent / EXTRACT_MANIFEST
     try:
@@ -359,13 +361,16 @@ def redo_items(vault: Vault) -> list:
     for note in vault.notes:
         if note.folder != "Sources" or str((note.fm or {}).get(REDO_KEY, "")).strip() != "vision":
             continue
-        for target in note.links:
-            raw = vault.resolve_raw(target)
-            entry = manifest.get(raw, {}) if raw else {}
-            if (entry.get("status") == "ok" and not entry.get("retry")
-                    and str(entry.get("method", "")).startswith("vision")):
-                items.append({"note": note.rel, "raw": raw, "text": entry.get("text")})
+        raws = sorted({raw for raw in map(vault.resolve_raw, note.links) if raw in manifest})
+        if raws and all(complete_vision(manifest[raw]) for raw in raws):
+            items.append({"note": note.rel,
+                          "raws": [{"raw": raw, "text": manifest[raw].get("text")} for raw in raws]})
     return sorted(items, key=lambda d: d["note"])
+
+
+def complete_vision(entry: dict) -> bool:
+    return (entry.get("status") == "ok" and not entry.get("retry") and bool(entry.get("complete"))
+            and str(entry.get("method", "")).startswith("vision"))
 
 
 # ---------------------------------------------------------------------------

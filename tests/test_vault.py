@@ -149,16 +149,32 @@ class TestRedo(VaultFixture):
     def manifest_says(self, **entry):
         self.manifest.write_text(json.dumps({"Raw/hw.pdf": entry}), encoding="utf-8")
 
-    def test_listed_once_a_vision_transcript_exists(self):
-        self.manifest_says(status="ok", method="vision:anthropic/claude-opus-5-5", text="x.txt")
-        self.assertEqual(self.scan()["redo"], [{"note": "Sources/HW.md", "raw": "Raw/hw.pdf",
-                                               "text": "x.txt"}])
+    def test_listed_once_a_complete_vision_transcript_exists(self):
+        self.manifest_says(status="ok", method="vision:anthropic/claude-opus-5-5", complete=True,
+                           text="x.txt")
+        self.assertEqual(self.scan()["redo"], [{"note": "Sources/HW.md",
+                                               "raws": [{"raw": "Raw/hw.pdf", "text": "x.txt"}]}])
 
-    def test_not_listed_while_still_ocr_or_retrying(self):
-        self.manifest_says(status="ok", method="ocr:jpn", text="x.txt")
+    def test_not_listed_while_still_ocr_retrying_or_incomplete(self):
+        for entry in ({"method": "ocr:jpn"},
+                      {"method": "vision:m（1/3 頁失敗）", "retry": True},
+                      {"method": "vision:m（1/3 頁失敗）"}):           # a refused page: final but incomplete
+            self.manifest_says(status="ok", text="x.txt", **entry)
+            self.assertEqual(self.scan()["redo"], [], entry)
+
+    def test_every_cited_file_must_be_ready(self):
+        write(self.root, "Raw/answers.pdf", "%PDF")
+        write(self.root, "Sources/HW.md",
+              note(status="budding", body="[[hw.pdf]] [[answers.pdf]]",
+                   extra="redo: vision\nsource_date: unknown\n"))
+        ready = {"status": "ok", "method": "vision:m", "complete": True, "text": "a.txt"}
+        self.manifest.write_text(json.dumps({"Raw/answers.pdf": ready,
+                                             "Raw/hw.pdf": {"status": "ok", "method": "ocr:jpn"}}),
+                                 encoding="utf-8")
         self.assertEqual(self.scan()["redo"], [])
-        self.manifest_says(status="ok", method="vision:m（1/3 頁失敗）", retry=True, text="x.txt")
-        self.assertEqual(self.scan()["redo"], [])
+        self.manifest.write_text(json.dumps({"Raw/answers.pdf": ready, "Raw/hw.pdf": ready}),
+                                 encoding="utf-8")
+        self.assertEqual(len(self.scan()["redo"]), 1)
 
     def test_no_manifest_means_nothing_to_redo(self):
         self.assertEqual(self.scan()["redo"], [])
