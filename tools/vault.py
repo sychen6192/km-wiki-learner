@@ -54,6 +54,12 @@ UNKNOWN_DATE = "unknown"
 # Ingestion watermarks ("where did I get to last time") for external sources.
 # Lives under loop/state/, which is gitignored — private to each machine.
 CURSOR_FILE = "loop/state/cursors.json"
+# What tools/extract.py read out of each Raw file, and how. Relative to the
+# repo root, i.e. the vault's parent directory.
+EXTRACT_MANIFEST = "loop/state/extracted/manifest.json"
+# Frontmatter a Source carries while it waits for a better transcript, e.g. a
+# homework digest written from OCR that could not see the red ink.
+REDO_KEY = "redo"
 
 WIKILINK_RE = re.compile(r"\[\[([^\]\|#\n]+)(?:#[^\]\|\n]*)?(?:\|[^\]\n]*)?\]\]")
 # Generated dashboard content is not part of the knowledge graph — links inside
@@ -263,6 +269,7 @@ def build_report(vault: Vault, today: dt.date) -> dict:
                 continue
             dangling.setdefault(target, []).append(note.rel)
     pending_raw = [rel for rel in vault.raw_files if rel not in ingested_raw]
+    redo = redo_items(vault)
 
     orphans = [
         n.rel for n in vault.notes
@@ -320,10 +327,12 @@ def build_report(vault: Vault, today: dt.date) -> dict:
             "due_reviews": len(due_reviews),
             "inbox_open": len(vault.inbox_items()),
             "pending_raw": len(pending_raw),
+            "redo": len(redo),
             "stale_sources": len(stale_sources),
         },
         "inbox": vault.inbox_items(),
         "pending_raw": pending_raw,
+        "redo": redo,
         "frontier": frontier,
         "stubs": sorted(stubs),
         "stale_seeds": sorted(stale_seeds),
@@ -331,6 +340,32 @@ def build_report(vault: Vault, today: dt.date) -> dict:
         "orphans": sorted(orphans),
         "due_reviews": sorted(due_reviews, key=lambda d: d["review_after"]),
     }
+
+
+def redo_items(vault: Vault) -> list:
+    """Sources marked `redo: vision` whose Raw file now has a vision transcript.
+
+    Once a Source cites its Raw file, that file stops being pending — so a
+    homework digest written from OCR, with no error table because the red ink
+    was unreadable, would never be revisited when a proper transcript arrives
+    later. This is the work item that brings it back.
+    """
+    manifest_path = vault.root.parent / EXTRACT_MANIFEST
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    items = []
+    for note in vault.notes:
+        if note.folder != "Sources" or str((note.fm or {}).get(REDO_KEY, "")).strip() != "vision":
+            continue
+        for target in note.links:
+            raw = vault.resolve_raw(target)
+            entry = manifest.get(raw, {}) if raw else {}
+            if (entry.get("status") == "ok" and not entry.get("retry")
+                    and str(entry.get("method", "")).startswith("vision")):
+                items.append({"note": note.rel, "raw": raw, "text": entry.get("text")})
+    return sorted(items, key=lambda d: d["note"])
 
 
 # ---------------------------------------------------------------------------

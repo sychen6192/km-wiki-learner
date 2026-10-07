@@ -89,7 +89,9 @@ make daily                                  # = ./loop/daily.sh
   （它不分顏色，也讀不好手寫）。vision 逐頁轉錄，手寫會標上筆的顏色（`〔手寫·黑：1，被紅筆劃掉〕`
   `〔手寫·紅：4〕`），迴圈再對照解答頁寫出錯題表。兩種接法：
   - Claude（GitHub Actions 預設）：`pip install anthropic`，設 `ANTHROPIC_API_KEY`，
-    `KM_VISION_MODEL=anthropic/claude-opus-5-5 make extract`。費用大約每頁 US$0.05–0.15，同一份檔案只讀一次。
+    `KM_VISION_MODEL=anthropic/claude-opus-5-5 make extract`。費用大約每頁 US$0.05–0.15，每頁只付一次
+    （讀過的頁各自快取，中途失敗也只補讀缺的頁）。本機排程跑的話，`KM_VISION_MODEL` 和 key 要設在
+    排程看得到的地方（cron 那一行、systemd 的 `Environment=`），不然那一圈只會沿用舊的轉錄、新檔走 OCR。
   - 自架 Ollama：`KM_VISION_MODEL=qwen3.8:27b make extract`，一頁 1～4 分鐘。
 
   `KM_VISION_MAX_PAGES` 可先試幾頁。連不上模型會自動退回 OCR，素材清單會註明「紅筆批改讀不到」。

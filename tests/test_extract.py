@@ -12,6 +12,7 @@ import contextlib
 import io
 import json
 import os
+import socket
 import sys
 import tempfile
 import threading
@@ -38,7 +39,8 @@ def message(text="〔手寫·紅：4〕", stop_reason="end_turn"):
 def fake_anthropic(outcomes, api_key="sk-ant-test"):
     """A stand-in for the SDK: records every request, answers from `outcomes`.
 
-    Each outcome is a message, or the name of an SDK exception to raise.
+    Each outcome is a message, the name of an SDK exception to raise, or any
+    other exception instance (what a dropped stream looks like: not an SDK type).
     """
     calls = []
     sdk = types.ModuleType("anthropic")
@@ -71,6 +73,8 @@ def fake_anthropic(outcomes, api_key="sk-ant-test"):
         def stream(self, **request):
             calls.append(request)
             outcome = outcomes[min(len(calls), len(outcomes)) - 1]
+            if isinstance(outcome, Exception):
+                raise outcome
             if isinstance(outcome, str):
                 raise getattr(sdk, outcome)(f"fake {outcome}")
             return Stream(outcome)
@@ -99,6 +103,10 @@ class ClaudeFixture(unittest.TestCase):
         self.addCleanup(env.stop)
         os.environ.pop("KM_VISION_EFFORT", None)
         os.environ.pop("KM_VISION_MAX_PAGES", None)
+        for name, value in (("PAGE_CACHE", self.dir / "pages"), ("_deadline", None)):
+            patcher = mock.patch.object(extract, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def use(self, *outcomes, **kw):
         sdk, calls = fake_anthropic(list(outcomes), **kw)
@@ -196,20 +204,44 @@ class TestClaudeFailures(ClaudeFixture):
             self.quietly(extract.vision_pages, self.pages)
         self.assertIn("fake BadRequestError", str(ctx.exception))
 
+    def test_unknown_effort_level_is_reported_once(self):
+        calls = self.use(message())
+        with mock.patch.dict(os.environ, {"KM_VISION_EFFORT": "extreme"}):
+            with self.assertRaises(extract.VisionError) as ctx:
+                self.quietly(extract.vision_pages, self.pages)
+        self.assertTrue(ctx.exception.fatal)
+        self.assertEqual(calls, [])
+
     def test_one_bad_page_does_not_cost_the_others(self):
         self.use(message("第一頁"), "RateLimitError", message(stop_reason="refusal"))
         result = self.quietly(extract.vision_pages, self.pages)
         self.assertIn("第一頁", result.text)
         self.assertEqual(result.text.count("[這頁沒讀到"), 2)
         self.assertEqual(result.method, f"vision:{CLAUDE}（2/3 頁失敗）")
-        self.assertEqual(result.fallback, "")
+        # The rate limit may clear by tomorrow; the refusal will not.
+        self.assertIn("1 頁暫時讀不到", result.retry)
+
+    def test_a_refusal_alone_is_final(self):
+        self.use(message("一"), message(stop_reason="refusal"), message("三"))
+        result = self.quietly(extract.vision_pages, self.pages)
+        self.assertEqual(result.retry, "")
+
+    def test_a_stream_that_drops_costs_one_page(self):
+        class RemoteProtocolError(Exception):     # httpx's, which the SDK lets through
+            pass
+        self.use(message("一"), RemoteProtocolError("peer closed connection"), message("三"))
+        result = self.quietly(extract.vision_pages, self.pages)
+        self.assertIn("一", result.text)
+        self.assertIn("三", result.text)
+        self.assertIn("RemoteProtocolError", result.text)
+        self.assertTrue(result.retry)
 
     def test_failed_vision_prefers_the_scanners_text_layer(self):
         self.use("AuthenticationError")
         result = self.quietly(extract.read_pages, self.pages, "スキャナーの文字層")
         self.assertEqual(result.text, "スキャナーの文字層")
         self.assertEqual(result.method, "pdftotext:scan")
-        self.assertIn("vision 失敗", result.fallback)
+        self.assertIn("vision 失敗", result.retry)
 
     def test_failed_vision_falls_back_to_ocr_and_says_why(self):
         self.use(api_key=None)
@@ -219,14 +251,56 @@ class TestClaudeFailures(ClaudeFixture):
                 mock.patch.object(extract, "run", return_value=ocr):
             result = self.quietly(extract.read_pages, self.pages[:1])
         self.assertEqual(result.method, "ocr:jpn")
-        self.assertIn("ANTHROPIC_API_KEY", result.fallback)
+        self.assertIn("ANTHROPIC_API_KEY", result.retry)
+
+
+class TestPageCache(ClaudeFixture):
+    """Pages are paid for once, whatever happened to the rest of the file."""
+
+    def test_only_the_page_that_failed_is_asked_for_again(self):
+        self.use(message("一"), "RateLimitError", message("三"))
+        self.quietly(extract.vision_pages, self.pages, "source-sha")
+        calls = self.use(message("二，這次讀到了"))
+        result = self.quietly(extract.vision_pages, self.pages, "source-sha")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result.retry, "")
+        for text in ("一", "二，這次讀到了", "三"):
+            self.assertIn(text, result.text)
+
+    def test_raising_the_page_limit_pays_only_for_new_pages(self):
+        self.use(message("一"))
+        with mock.patch.dict(os.environ, {"KM_VISION_MAX_PAGES": "1"}):
+            self.quietly(extract.vision_pages, self.pages, "source-sha")
+        calls = self.use(message("後面"))
+        self.quietly(extract.vision_pages, self.pages, "source-sha")
+        self.assertEqual(len(calls), 2)
+
+    def test_rewording_the_prompt_reads_pages_again(self):
+        self.use(message("一"))
+        self.quietly(extract.vision_pages, self.pages, "source-sha")
+        calls = self.use(message("新"))
+        with mock.patch.object(extract, "VISION_PROMPT", extract.VISION_PROMPT + "。"):
+            self.quietly(extract.vision_pages, self.pages, "source-sha")
+        self.assertEqual(len(calls), 3)
+
+    def test_out_of_time_defers_unread_pages_instead_of_failing(self):
+        extract.write_atomically(extract.cached_page("source-sha", 1), "第一頁（之前讀過）")
+        calls = self.use(message())
+        with mock.patch.object(extract, "_deadline", 0.0):
+            result = self.quietly(extract.vision_pages, self.pages, "source-sha")
+            with self.assertRaises(extract.OutOfTime):
+                self.quietly(extract.vision_pages, self.pages, "other-file")
+        self.assertEqual(calls, [])
+        self.assertIn("第一頁（之前讀過）", result.text)
+        self.assertEqual(result.text.count("[這頁還沒讀"), 2)
+        self.assertIn("延後", result.retry)
 
 
 class TestCacheAndReport(unittest.TestCase):
-    def test_a_fallback_is_never_a_cache_hit(self):
+    def test_nothing_marked_for_retry_is_a_cache_hit(self):
         recipe = "vision|x"
         self.assertTrue(extract.reusable({"status": "ok", "recipe": recipe}, recipe))
-        self.assertFalse(extract.reusable({"status": "ok", "recipe": recipe, "fallback": True}, recipe))
+        self.assertFalse(extract.reusable({"status": "ok", "recipe": recipe, "retry": True}, recipe))
         self.assertFalse(extract.reusable({"status": "ok", "recipe": "ocr|eng|200"}, recipe))
 
     def test_rewording_the_prompt_invalidates_vision_caches(self):
@@ -252,6 +326,12 @@ class TestCacheAndReport(unittest.TestCase):
         self.assertNotIn(extract.HANDWRITING_WARNING, lines["Raw/vision.pdf"])
         self.assertNotIn(extract.HANDWRITING_WARNING, lines["Raw/born-digital.pdf"])
 
+    def test_report_says_when_a_file_waits_for_the_next_run(self):
+        text = extract.report({"Raw/big.pdf": {"status": "deferred", "text": None,
+                                               "method": None, "chars": 0}})
+        self.assertIn("⏳", text)
+        self.assertIn("下一圈", text)
+
 
 class TestFreshCheckout(unittest.TestCase):
     """CI checks the repo out fresh every run, which resets every mtime."""
@@ -262,11 +342,13 @@ class TestFreshCheckout(unittest.TestCase):
         repo = Path(self._tmp.name)
         raw = repo / "vault" / "Raw"
         raw.mkdir(parents=True)
+        self.raw = raw
         self.source = raw / "homework.jpg"
         self.source.write_bytes(b"\xff\xd8 page")
         out = repo / "loop" / "state" / "extracted"
         for name, value in (("REPO", repo), ("RAW", raw), ("OUT", out),
-                            ("MANIFEST", out / "manifest.json")):
+                            ("MANIFEST", out / "manifest.json"), ("PAGE_CACHE", out / "pages"),
+                            ("ocr_languages", lambda: "jpn")):
             patcher = mock.patch.object(extract, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -276,14 +358,16 @@ class TestFreshCheckout(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.reads = 0
         self.manifest = out / "manifest.json"
+        self.target = out / "homework.jpg.txt"
 
-    def read(self, path):
+    def read(self, path, source=""):
         self.reads += 1
         return extract.Extraction(f"read #{self.reads}", f"vision:{CLAUDE}")
 
     def run_extract(self):
-        with contextlib.redirect_stdout(io.StringIO()):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
             extract.main([])
+        self.report = out.getvalue()
         return json.loads(self.manifest.read_text(encoding="utf-8"))
 
     def test_same_bytes_are_not_read_twice_even_with_a_new_mtime(self):
@@ -300,11 +384,62 @@ class TestFreshCheckout(unittest.TestCase):
         self.run_extract()
         self.assertEqual(self.reads, 2)
 
-    def test_a_fallback_is_retried_next_run(self):
+    def test_a_result_marked_for_retry_is_redone_next_run(self):
         with mock.patch.object(extract, "extract", return_value=extract.Extraction(
                 "ocr", "ocr:jpn", "vision 失敗（沒有憑證）")):
             entry = self.run_extract()["Raw/homework.jpg"]
-        self.assertTrue(entry["fallback"])
+        self.assertTrue(entry["retry"])
+        self.run_extract()
+        self.assertEqual(self.reads, 1)
+
+    def test_a_run_killed_halfway_keeps_the_files_it_finished(self):
+        (self.raw / "second.jpg").write_bytes(b"\xff\xd8 second")
+
+        def dies_on_second(path, source=""):
+            if path.name == "second.jpg":
+                raise KeyboardInterrupt
+            return self.read(path)
+        with mock.patch.object(extract, "extract", side_effect=dies_on_second):
+            with self.assertRaises(KeyboardInterrupt):
+                self.run_extract()
+        self.run_extract()
+        self.assertEqual(self.reads, 2)      # homework once, second once — not homework twice
+
+    def test_a_run_without_vision_keeps_the_vision_transcript(self):
+        self.run_extract()
+        with mock.patch.dict(os.environ, {"KM_VISION_MODEL": ""}):
+            entry = self.run_extract()["Raw/homework.jpg"]
+        self.assertEqual(self.reads, 1)
+        self.assertEqual(entry["method"], f"vision:{CLAUDE}")
+        self.assertEqual(self.target.read_text(encoding="utf-8"), "read #1")
+
+    def test_failed_vision_does_not_overwrite_an_older_transcript(self):
+        self.run_extract()
+        ocr = extract.Extraction("OCR noise", "ocr:jpn", "vision 失敗（API 掛了）")
+        with mock.patch.object(extract, "VISION_PROMPT", extract.VISION_PROMPT + "。"), \
+                mock.patch.object(extract, "extract", return_value=ocr):
+            entry = self.run_extract()["Raw/homework.jpg"]
+        self.assertEqual(self.target.read_text(encoding="utf-8"), "read #1")
+        self.assertEqual(entry["method"], f"vision:{CLAUDE}")
+        self.assertTrue(entry["retry"])
+
+    def test_a_failed_retry_stays_marked_for_retry(self):
+        with mock.patch.object(extract, "extract", return_value=extract.Extraction(
+                "ocr", "ocr:jpn", "vision 失敗")):
+            self.run_extract()
+        with mock.patch.object(extract, "extract", side_effect=RuntimeError("tesseract 不見了")):
+            entry = self.run_extract()["Raw/homework.jpg"]
+        self.assertTrue(entry["retry"])
+        self.assertIn("sha256", entry)
+        self.run_extract()
+        self.assertEqual(self.reads, 1)
+
+    def test_out_of_time_defers_the_file(self):
+        with mock.patch.object(extract, "out_of_time", return_value=True):
+            entry = self.run_extract()["Raw/homework.jpg"]
+        self.assertEqual(entry["status"], "deferred")
+        self.assertEqual(self.reads, 0)
+        self.assertIn("⏳", self.report)
         self.run_extract()
         self.assertEqual(self.reads, 1)
 
@@ -414,7 +549,9 @@ class TestClaudeOverTheWire(unittest.TestCase):
         self.addCleanup(env.stop)
         for name in ("ANTHROPIC_AUTH_TOKEN", "KM_VISION_EFFORT"):
             os.environ.pop(name, None)
-        self.page = Path(tempfile.mkdtemp()) / "page-1.jpg"
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.page = Path(tmp.name) / "page-1.jpg"
         self.page.write_bytes(b"\xff\xd8 fake jpeg")
 
     def test_request_and_reply_round_trip_through_the_sdk(self):
@@ -428,6 +565,38 @@ class TestClaudeOverTheWire(unittest.TestCase):
         self.assertNotIn("output_config", body)
         self.assertTrue(body["stream"])
         self.assertEqual(body["messages"][0]["content"][0]["source"]["media_type"], "image/jpeg")
+
+
+    def test_a_stream_that_drops_mid_reply_is_a_page_failure(self):
+        """The SDK does not wrap errors raised while reading the stream."""
+        class Dropping(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Transfer-Encoding", "chunked")
+                self.end_headers()
+                event, data = TestClaudeOverTheWire.REPLY[0]
+                chunk = f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                self.wfile.flush()
+                self.connection.shutdown(socket.SHUT_RDWR)   # mid-reply, no final chunk
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Dropping)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        with mock.patch.dict(os.environ, {
+                "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.server_address[1]}"}):
+            with self.assertRaises(extract.VisionError) as ctx:
+                extract.ask_vision(self.page)
+        self.assertFalse(ctx.exception.fatal)
+        self.assertTrue(ctx.exception.transient)
 
 
 if __name__ == "__main__":

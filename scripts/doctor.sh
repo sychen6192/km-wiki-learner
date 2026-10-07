@@ -91,11 +91,14 @@ else
     warn "沒有 tesseract，掃描件／照片無法辨識（macOS: brew install tesseract tesseract-lang / Windows: winget install UB-Mannheim.TesseractOCR）"
 fi
 if [[ "${KM_VISION_MODEL:-}" == anthropic/* ]]; then
-    sdk="$("${KM_PYTHON:-python3}" -c 'import anthropic; print(anthropic.__version__)' 2>/dev/null)"
+    py="${KM_PYTHON:-python3}"
+    sdk="$("$py" -c 'import anthropic; print(anthropic.__version__)' 2>/dev/null)"
     if [[ -z "$sdk" ]]; then
-        warn "設了 KM_VISION_MODEL=$KM_VISION_MODEL 但沒裝 anthropic 套件，掃描件會退回 OCR（$KM_PYTHON -m pip install anthropic）"
-    elif [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
-        warn "設了 KM_VISION_MODEL=$KM_VISION_MODEL 但沒有 ANTHROPIC_API_KEY，掃描件會退回 OCR"
+        warn "設了 KM_VISION_MODEL=$KM_VISION_MODEL 但沒裝 anthropic 套件，掃描件會退回 OCR（$py -m pip install anthropic）"
+    # Ask the SDK, as extract.py does: it also accepts an `ant auth login`
+    # profile and workload identity, not just the environment variables.
+    elif ! "$py" -c 'import anthropic,sys; c=anthropic.Anthropic(); sys.exit(0 if (c.api_key or c.auth_token or getattr(c, "credentials", None)) else 1)' >/dev/null 2>&1; then
+        warn "設了 KM_VISION_MODEL=$KM_VISION_MODEL 但沒有 Anthropic 憑證（ANTHROPIC_API_KEY），掃描件會退回 OCR"
     else
         ok "vision — 掃描件與作業交給 $KM_VISION_MODEL 逐頁轉錄（anthropic $sdk），紅筆批改讀得到"
     fi

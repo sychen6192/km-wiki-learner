@@ -20,7 +20,9 @@ permissions:
 jobs:
   loop:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # 20 min of vision (KM_EXTRACT_BUDGET_SEC) + one page in flight + 60 min of
+    # agent + 15 min repair pass, with room to spare.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,7 +59,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: loop/state/extracted
-          key: extracted-${{ github.run_id }}
+          key: extracted-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: extracted-
 
       - name: Configure git identity
@@ -70,15 +72,19 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           KM_MODEL: ${{ vars.KM_MODEL || 'anthropic/claude-sonnet-4-5' }}
           KM_VISION_MODEL: ${{ vars.KM_VISION_MODEL || 'anthropic/claude-opus-5-5' }}
+          # A big backlog (or a prompt change, which re-reads every page) is
+          # spread over several days instead of eating the agent's time.
+          KM_EXTRACT_BUDGET_SEC: ${{ vars.KM_EXTRACT_BUDGET_SEC || '1200' }}
           KM_MAX_ITEMS: ${{ vars.KM_MAX_ITEMS || '3' }}
           KM_TOPIC: ${{ inputs.topic }}
         run: ./loop/daily.sh
 
-      # Saved under a fresh key every run (caches are immutable once written),
-      # and even when the loop failed: pages already paid for stay paid for.
+      # Saved under a fresh key every run and every re-run attempt (caches are
+      # immutable once written), and even when the loop failed: pages already
+      # paid for stay paid for.
       - name: Save extracted text
         if: always()
         uses: actions/cache/save@v4
         with:
           path: loop/state/extracted
-          key: extracted-${{ github.run_id }}
+          key: extracted-${{ github.run_id }}-${{ github.run_attempt }}

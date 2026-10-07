@@ -135,6 +135,35 @@ class TestScan(VaultFixture):
         self.assertEqual(r["totals"]["notes"], 1)
 
 
+class TestRedo(VaultFixture):
+    """A homework digest written from OCR comes back once vision has read it."""
+
+    def setUp(self):
+        super().setUp()
+        write(self.root, "Raw/hw.pdf", "%PDF")
+        write(self.root, "Sources/HW.md",
+              note(status="budding", body="摘要 [[hw.pdf]]", extra="redo: vision\nsource_date: unknown\n"))
+        self.manifest = self.root.parent / "loop/state/extracted/manifest.json"
+        self.manifest.parent.mkdir(parents=True)
+
+    def manifest_says(self, **entry):
+        self.manifest.write_text(json.dumps({"Raw/hw.pdf": entry}), encoding="utf-8")
+
+    def test_listed_once_a_vision_transcript_exists(self):
+        self.manifest_says(status="ok", method="vision:anthropic/claude-opus-5-5", text="x.txt")
+        self.assertEqual(self.scan()["redo"], [{"note": "Sources/HW.md", "raw": "Raw/hw.pdf",
+                                               "text": "x.txt"}])
+
+    def test_not_listed_while_still_ocr_or_retrying(self):
+        self.manifest_says(status="ok", method="ocr:jpn", text="x.txt")
+        self.assertEqual(self.scan()["redo"], [])
+        self.manifest_says(status="ok", method="vision:m（1/3 頁失敗）", retry=True, text="x.txt")
+        self.assertEqual(self.scan()["redo"], [])
+
+    def test_no_manifest_means_nothing_to_redo(self):
+        self.assertEqual(self.scan()["redo"], [])
+
+
 class TestSourceDating(VaultFixture):
     """A digest that hides its source's age reads as current — flag it."""
 

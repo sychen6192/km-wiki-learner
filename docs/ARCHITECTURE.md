@@ -118,6 +118,10 @@ agent 看到就不寫錯題表。掃描 App 存的 PDF 常內嵌 OCR 文字層�
 fresh checkout 都會變，用它判斷會讓付費的 vision 每天重讀同一份檔。vision 失敗退回 OCR 的結果
 不算快取命中，下一圈會再試。
 
+vision 每讀完一頁就各自存一份（`loop/state/extracted/pages/`，key 是來源 sha256＋頁碼＋轉錄設定），
+清單也是每處理完一個檔就寫一次。所以跑到一半被砍、某頁連線斷掉、或時間預算用完，下一圈都只補讀
+缺的那幾頁，已經付過錢的頁不會再送。沒設 vision 的那一圈也不會拿 OCR 蓋掉先前的 vision 轉錄。
+
 ---
 
 ## 環境變數
@@ -133,13 +137,14 @@ fresh checkout 都會變，用它判斷會讓付費的 vision 每天重讀同一
 | `KM_PYTHON` | 自動偵測 | 工具鏈用的直譯器 |
 | `KM_VISION_MODEL` | — | 設了掃描件才走 vision；`anthropic/…` 走 Claude，其他走 Ollama |
 | `KM_VISION_EFFORT` | 模型預設（Opus 5.5 是 `medium`） | Claude 的 effort（`low`～`max`）；不支援 effort 的舊模型不要設 |
-| `KM_RASTER_DPI` | 200 | 掃描件轉圖解析度（**教材建議 300**） |
+| `KM_RASTER_DPI` | 200 | OCR 與 Ollama 的轉圖解析度（**教材建議 300**）；Claude 固定轉成長邊 2200 px，不看這個 |
 | `KM_VISION_MAX_PAGES` | 0（全部） | 先試幾頁 |
 | `KM_LOCK_STALE_SEC` | 120 | 心跳停多久算廢鎖 |
 | `KM_HEARTBEAT_SEC` | 30 | 持有者多久 touch 一次心跳 |
 | `KM_TOPIC` | — | 設了就跑隨選深潛（`prompts/learn.md`）而非每日迴圈 |
 | `KM_OCR_LANG` | 自動偵測 | 覆寫 tesseract 語言，如 `jpn+eng` |
 | `KM_VISION_TIMEOUT` | 900 | vision 每頁的秒數上限 |
+| `KM_EXTRACT_BUDGET_SEC` | 0（不限；CI 預設 1200） | 超過就不再送新頁面給 vision，剩下的下一圈接著讀 |
 | `KM_SHELL` | 自動找 `bash` | `render.py` 展開 `` !`…` `` 用的 shell |
 
 `tools/agent.py`（內建 runner）另外讀這些：
